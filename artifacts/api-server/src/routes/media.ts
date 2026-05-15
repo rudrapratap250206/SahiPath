@@ -3,7 +3,7 @@ import { verifyToken, parseCookieToken } from "../lib/auth";
 import { rateLimit } from "../lib/rateLimit";
 import { logger } from "../lib/logger";
 
-const ALLOWED_TYPES = new Set(["image", "podcast", "video", "ppt"]);
+const ALLOWED_TYPES = new Set(["image", "podcast"]);
 
 const router = Router();
 
