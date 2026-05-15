@@ -1,81 +1,148 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { careerData, translations, languageInfo } from './lib/data';
 import { RAGSystem, UserProfile } from './lib/rag';
-import { useMentorChat, useRegister, useLogin, useLogout, useSaveProfile, useRecordTest } from '@workspace/api-client-react';
+import { useMentorChat, useRegister, useLogin, useLogout, useSaveProfile, useGetMe } from '@workspace/api-client-react';
+import { VoiceRow } from './components/VoiceFill';
+import { TestsView } from './components/TestsView';
+import { PerformanceView } from './components/PerformanceView';
+import { ResumeView } from './components/ResumeView';
+import { JobsView } from './components/JobsView';
+
+interface Notification {
+  id: string;
+  topic: string;
+  scheduledAt: number;
+}
 
 export default function App() {
   const [language, setLanguage] = useState<string | null>(null);
-  const [isListening, setIsListening] = useState(false);
   const [isSpeaking, setIsSpeaking] = useState(false);
   const [twoPersonMode, setTwoPersonMode] = useState(false);
-  const [view, setView] = useState<'chat'|'performance'|'tests'|'resume'|'jobs'|'media'>('chat');
+  const [view, setView] = useState<'chat' | 'performance' | 'tests' | 'resume' | 'jobs' | 'media'>('chat');
   const [showLogin, setShowLogin] = useState(false);
   const [showRegister, setShowRegister] = useState(false);
   const [authEmail, setAuthEmail] = useState('');
   const [authPassword, setAuthPassword] = useState('');
   const [authError, setAuthError] = useState<string | null>(null);
+  const [isLoggedIn, setIsLoggedIn] = useState(false);
   const [stage, setStage] = useState<'language' | 'personal' | 'professional' | 'mentor'>('language');
   const [ragSystem, setRagSystem] = useState<RAGSystem | null>(null);
   const chatBottomRef = useRef<HTMLDivElement>(null);
+  const [pendingTestTopic, setPendingTestTopic] = useState<string | null>(null);
+  const [toastMsg, setToastMsg] = useState<string | null>(null);
+  const [isListening, setIsListening] = useState(false);
+  const recognitionRef = useRef<any>(null);
+  const voiceConvRef = useRef(false);
+  const pendingVoiceRef = useRef(false);
 
   const [personalData, setPersonalData] = useState({
-    firstName: '',
-    lastName: '',
-    age: '',
-    email: '',
-    location: '',
-    educationLevel: "Bachelor's",
-    currentRole: '',
-    yearsOfExperience: '',
+    firstName: '', lastName: '', age: '', email: '', location: '',
+    educationLevel: "Bachelor's", currentRole: '', yearsOfExperience: '',
   });
-
   const [professionalData, setProfessionalData] = useState({
-    skills: '',
-    careerInterests: '',
-    currentGoals: '',
-    challenges: '',
-    availableHoursPerWeek: '',
-    preferredLearningStyle: 'Interactive',
+    skills: '', careerInterests: '', currentGoals: '', challenges: '',
+    availableHoursPerWeek: '', preferredLearningStyle: 'Interactive',
   });
 
   const [chatMessages, setChatMessages] = useState<Array<{ role: string; text: string }>>([]);
   const [chatInput, setChatInput] = useState('');
-  const recognitionRef = useRef<any>(null);
-  const voiceConversationRef = useRef(false);
-  const pendingVoiceReplyRef = useRef(false);
 
-  const mentorChatMutation = useMentorChat();
+  const mentorMutation = useMentorChat();
   const registerMutation = useRegister();
   const loginMutation = useLogin();
   const logoutMutation = useLogout();
   const saveProfileMutation = useSaveProfile();
-  const recordTestMutation = useRecordTest();
+  const getMeQuery = useGetMe({ query: { enabled: false } });
 
-  const t = language && translations[language] ? translations[language] : null;
+  const t = language && (translations as any)[language] ? (translations as any)[language] : null;
+  const lang = language === 'Hindi' ? 'hi-IN' : language === 'Tamil' ? 'ta-IN' : language === 'Telugu' ? 'te-IN' : language === 'Kannada' ? 'kn-IN' : language === 'Malayalam' ? 'ml-IN' : 'en-US';
 
-  useEffect(() => {
-    chatBottomRef.current?.scrollIntoView({ behavior: 'smooth' });
-  }, [chatMessages]);
+  useEffect(() => { chatBottomRef.current?.scrollIntoView({ behavior: 'smooth' }); }, [chatMessages]);
 
-  const handleLanguageSelect = (selectedLang: string) => {
-    setLanguage(selectedLang);
-    const rag = new RAGSystem();
-    setRagSystem(rag);
-    setStage('personal');
+  const showToast = (msg: string, ms = 4000) => {
+    setToastMsg(msg);
+    setTimeout(() => setToastMsg(null), ms);
   };
+
+  // Study tracker — detect when AI mentions studying a topic and schedule a test notification
+  const detectStudyTopic = (text: string) => {
+    const patterns = [
+      /you should (?:study|learn|practice|cover|go through) ([A-Za-z0-9 .#+/-]+?)(?:\.|\,|\!|$)/i,
+      /start with ([A-Za-z0-9 .#+/-]+?)(?:\.|\,|\!| which| for| and|$)/i,
+      /focus on ([A-Za-z0-9 .#+/-]+?)(?:\.|\,|\!| which| for| and|$)/i,
+      /complete ([A-Za-z0-9 .#+/-]+?)(?:\.|\,|\!| which| for| and|$)/i,
+    ];
+    for (const p of patterns) {
+      const m = text.match(p);
+      if (m && m[1]) {
+        const topic = m[1].trim().replace(/['"]/g, '').slice(0, 60);
+        if (topic.length >= 3) return topic;
+      }
+    }
+    return null;
+  };
+
+  const scheduleTestNotification = (topic: string) => {
+    const notif: Notification = { id: `n-${Date.now()}`, topic, scheduledAt: Date.now() };
+    try {
+      const existing = JSON.parse(localStorage.getItem('sp_upcoming_tests') || '[]');
+      if (!existing.some((n: Notification) => n.topic.toLowerCase() === topic.toLowerCase())) {
+        const updated = [...existing, notif];
+        localStorage.setItem('sp_upcoming_tests', JSON.stringify(updated));
+        showToast(`📚 Topic detected: "${topic}". A test reminder has been added in the Tests tab!`);
+      }
+    } catch {}
+  };
+
+  // Restore session on load
+  useEffect(() => {
+    const tryRestore = async () => {
+      // Try cookie-based auth first
+      try {
+        const res = await fetch('/api/auth/me');
+        if (res.ok) {
+          const data = await res.json();
+          const profile = data?.user?.profile;
+          if (profile) {
+            const rag = new RAGSystem();
+            rag.setUserProfile(profile);
+            setRagSystem(rag);
+            setLanguage(profile.language || 'English');
+            setIsLoggedIn(true);
+            setStage('mentor');
+            setChatMessages([{ role: 'assistant', text: `Welcome back, ${profile.firstName}! How can I help you today?` }]);
+            return;
+          }
+        }
+      } catch {}
+      // Fall back to localStorage
+      try {
+        const saved = localStorage.getItem('sahipath_profile');
+        if (saved) {
+          const profile = JSON.parse(saved);
+          const rag = new RAGSystem();
+          rag.setUserProfile(profile);
+          setRagSystem(rag);
+          setLanguage(profile.language || 'English');
+          setStage('mentor');
+          const welcome = rag.generateResponse(`Welcome back ${profile.firstName}`, careerData);
+          setChatMessages([{ role: 'assistant', text: welcome || `Welcome back, ${profile.firstName}!` }]);
+        }
+      } catch {}
+    };
+    tryRestore();
+  }, []);
 
   const speakText = (text: string) => {
     const synth = window.speechSynthesis;
     if (!synth) return;
     const utter = new SpeechSynthesisUtterance(text);
-    utter.lang = language === 'Hindi' ? 'hi-IN' : language === 'Tamil' ? 'ta-IN' : 'en-US';
+    utter.lang = lang;
     utter.onstart = () => setIsSpeaking(true);
     utter.onend = () => {
       setIsSpeaking(false);
-      if (voiceConversationRef.current && twoPersonMode) {
-        setTimeout(() => {
-          if (!recognitionRef.current) startListening(true);
-        }, 250);
+      if (voiceConvRef.current && twoPersonMode && !recognitionRef.current) {
+        setTimeout(() => startListening(true), 300);
       }
     };
     synth.cancel();
@@ -83,333 +150,354 @@ export default function App() {
   };
 
   const stopListening = () => {
-    voiceConversationRef.current = false;
-    pendingVoiceReplyRef.current = false;
+    voiceConvRef.current = false;
+    pendingVoiceRef.current = false;
     setIsListening(false);
     try { recognitionRef.current?.stop?.(); } catch {}
     recognitionRef.current = null;
   };
 
   const startListening = async (autoSend = false) => {
-    const w: any = window as any;
-    const SpeechRecognition = w.SpeechRecognition || w.webkitSpeechRecognition;
-    if (!SpeechRecognition) { alert('Speech recognition not supported in this browser'); return; }
-    const recog = new SpeechRecognition();
-    recog.lang = language === 'Hindi' ? 'hi-IN' : language === 'Tamil' ? 'ta-IN' : 'en-US';
+    const w: any = window;
+    const SR = w.SpeechRecognition || w.webkitSpeechRecognition;
+    if (!SR) { alert('Speech recognition not supported in this browser'); return; }
+    const recog = new SR();
+    recog.lang = lang;
     recog.interimResults = false;
-    recog.continuous = twoPersonMode;
+    recog.continuous = false;
     recog.maxAlternatives = 1;
     recog.onresult = async (e: any) => {
       const transcript = e.results[e.results.length - 1][0].transcript.trim();
       if (!transcript) return;
-      if (twoPersonMode && autoSend) {
-        pendingVoiceReplyRef.current = true;
-        setChatInput(transcript);
+      if (autoSend && twoPersonMode) {
+        pendingVoiceRef.current = true;
         recog.stop();
-        await handleChatSubmitWithMessage(transcript, 'voice');
+        await sendMentorMessage(transcript, 'voice');
         return;
       }
       setChatInput(prev => (prev ? prev + ' ' + transcript : transcript));
     };
-    recog.onend = () => {
-      setIsListening(false);
-      recognitionRef.current = null;
-      if (twoPersonMode && voiceConversationRef.current && pendingVoiceReplyRef.current) {
-        pendingVoiceReplyRef.current = false;
-      }
-    };
-    recog.onerror = () => {
-      setIsListening(false);
-      recognitionRef.current = null;
-      pendingVoiceReplyRef.current = false;
-    };
+    recog.onend = () => { setIsListening(false); recognitionRef.current = null; };
+    recog.onerror = () => { setIsListening(false); recognitionRef.current = null; };
     recognitionRef.current = recog;
     setIsListening(true);
     recog.start();
   };
 
-  const sendMentorMessage = async (userMsg: string, source: 'text' | 'voice') => {
-    if (!ragSystem) return;
-    setChatMessages(prev => [...prev, { role: 'user', text: userMsg }]);
-    const profile = ragSystem.getUserProfile();
-
-    try {
-      const data = await mentorChatMutation.mutateAsync({
-        data: { message: userMsg, profile: profile as any, mode: source === 'voice' ? 'voice' : 'text' }
-      });
-      const reply = data.reply || 'No reply returned.';
-      setChatMessages(prev => [...prev, { role: 'assistant', text: reply }]);
-      if (twoPersonMode && source === 'voice') speakText(reply);
-    } catch (err: any) {
-      const fallback = err?.data?.error || err?.message || 'Unable to generate reply';
-      setChatMessages(prev => [...prev, { role: 'assistant', text: fallback }]);
-    }
-  };
-
-  const handlePersonalSubmit = (e: React.FormEvent) => {
-    e.preventDefault();
-    if (!personalData.firstName || !personalData.email || !personalData.currentRole) {
-      alert(t?.['alert_fillRequired'] || 'Please fill all required fields');
-      return;
-    }
-    setStage('professional');
-  };
-
-  useEffect(() => {
-    try {
-      const saved = localStorage.getItem('sahipath_profile');
-      if (saved) {
-        const profile = JSON.parse(saved);
-        const rag = new RAGSystem();
-        rag.setUserProfile(profile);
-        setRagSystem(rag);
-        setLanguage(profile.language);
-        setStage('mentor');
-        const welcome = rag.generateResponse(`Welcome back ${profile.firstName}`, careerData);
-        setChatMessages([{ role: 'assistant', text: welcome }]);
-      }
-    } catch {}
-  }, []);
-
   useEffect(() => {
     if (stage !== 'mentor') return;
     if (twoPersonMode) {
-      voiceConversationRef.current = true;
+      voiceConvRef.current = true;
       if (!recognitionRef.current && !isListening) void startListening(true);
     } else {
       stopListening();
     }
   }, [twoPersonMode, stage]);
 
-  const handleProfessionalSubmit = (e: React.FormEvent) => {
+  const sendMentorMessage = async (userMsg: string, source: 'text' | 'voice') => {
+    if (!ragSystem) return;
+    setChatMessages(prev => [...prev, { role: 'user', text: userMsg }]);
+    const profile = ragSystem.getUserProfile();
+    try {
+      const data = await mentorMutation.mutateAsync({
+        data: { message: userMsg, profile: profile as any, mode: source }
+      });
+      const reply = data.reply || 'No reply returned.';
+      setChatMessages(prev => [...prev, { role: 'assistant', text: reply }]);
+      const topic = detectStudyTopic(reply);
+      if (topic) scheduleTestNotification(topic);
+      if (twoPersonMode && source === 'voice') speakText(reply);
+    } catch (err: any) {
+      const fallback = err?.data?.error || err?.message || 'Unable to reach the mentor. Check your GEMINI_API_KEY.';
+      setChatMessages(prev => [...prev, { role: 'assistant', text: fallback }]);
+    }
+  };
+
+  const handlePersonalSubmit = (e: React.FormEvent) => {
     e.preventDefault();
-    if (!professionalData.skills || !professionalData.careerInterests || !professionalData.currentGoals) {
+    if (!personalData.firstName.trim() || !personalData.email.trim() || !personalData.currentRole.trim()) {
       alert(t?.['alert_fillRequired'] || 'Please fill all required fields');
       return;
     }
+    if (!personalData.email.includes('@')) {
+      alert('Please enter a valid email address (e.g. you@gmail.com)');
+      return;
+    }
+    setStage('professional');
+  };
 
+  const handleProfessionalSubmit = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!professionalData.skills.trim() || !professionalData.careerInterests.trim() || !professionalData.currentGoals.trim()) {
+      alert(t?.['alert_fillRequired'] || 'Please fill all required fields');
+      return;
+    }
     const userProfile: UserProfile = {
       language: language!,
-      firstName: personalData.firstName,
-      lastName: personalData.lastName,
+      firstName: personalData.firstName.trim(),
+      lastName: personalData.lastName.trim(),
       age: parseInt(personalData.age) || 0,
-      email: personalData.email,
-      location: personalData.location,
+      email: personalData.email.trim(),
+      location: personalData.location.trim(),
       educationLevel: personalData.educationLevel,
-      currentRole: personalData.currentRole,
+      currentRole: personalData.currentRole.trim(),
       yearsOfExperience: parseInt(personalData.yearsOfExperience) || 0,
-      skills: professionalData.skills.split(',').map(s => s.trim()),
-      careerInterests: professionalData.careerInterests.split(',').map(s => s.trim()),
-      currentGoals: professionalData.currentGoals,
-      challenges: professionalData.challenges,
+      skills: professionalData.skills.split(',').map(s => s.trim()).filter(Boolean),
+      careerInterests: professionalData.careerInterests.split(',').map(s => s.trim()).filter(Boolean),
+      currentGoals: professionalData.currentGoals.trim(),
+      challenges: professionalData.challenges.trim(),
       availableHoursPerWeek: parseInt(professionalData.availableHoursPerWeek) || 0,
       preferredLearningStyle: professionalData.preferredLearningStyle,
       createdAt: new Date().toISOString(),
       updatedAt: new Date().toISOString(),
     };
 
-    if (ragSystem) ragSystem.setUserProfile(userProfile);
+    const rag = new RAGSystem();
+    rag.setUserProfile(userProfile);
+    setRagSystem(rag);
 
     try { localStorage.setItem('sahipath_profile', JSON.stringify(userProfile)); } catch {}
-    try { saveProfileMutation.mutate({ data: userProfile as any }); } catch {}
+    try { await saveProfileMutation.mutateAsync({ data: userProfile as any }); } catch {}
 
-    const welcomeMsg = ragSystem?.generateResponse(`Hello, I'm ${personalData.firstName}. I'm starting my career journey.`, careerData);
-    setChatMessages([{ role: 'assistant', text: welcomeMsg || `Welcome ${personalData.firstName}! I'm your AI career mentor.` }]);
+    const welcomeMsg = rag.generateResponse(`Hello, I'm ${userProfile.firstName}.`, careerData);
+    setChatMessages([{ role: 'assistant', text: welcomeMsg || `Welcome ${userProfile.firstName}! I'm your SahiPath AI mentor.` }]);
     setStage('mentor');
   };
 
   const handleChatSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!chatInput.trim() || !ragSystem) return;
-    const userMsg = chatInput;
+    const msg = chatInput.trim();
     setChatInput('');
-    await sendMentorMessage(userMsg, 'text');
+    await sendMentorMessage(msg, 'text');
   };
 
-  const handleChatSubmitWithMessage = async (userMsg: string, source: 'text' | 'voice') => {
-    if (!ragSystem) return;
-    await sendMentorMessage(userMsg, source);
-    setChatInput('');
+  const handleLogout = () => {
+    logoutMutation.mutate({});
+    setStage('language');
+    setLanguage(null);
+    setRagSystem(null);
+    setIsLoggedIn(false);
+    setView('chat');
+    setChatMessages([]);
+    localStorage.removeItem('sahipath_profile');
   };
 
-  // STAGE: Language Selection
+  // ------- STAGE: Language -------
   if (stage === 'language') {
-    const allLanguages = Object.keys(languageInfo);
-    const indianLanguages = allLanguages.filter(lang => (languageInfo as any)[lang].region === 'India');
-    const globalLanguages = allLanguages.filter(lang => (languageInfo as any)[lang].region === 'Global');
+    const allLanguages = Object.keys(languageInfo as any);
+    const indLangs = allLanguages.filter(l => (languageInfo as any)[l].region === 'India');
+    const globalLangs = allLanguages.filter(l => (languageInfo as any)[l].region === 'Global');
 
     return (
       <div className="sp-container sp-welcome">
         <div className="sp-card sp-language-selection">
-          <div style={{ display: 'flex', justifyContent: 'flex-end', gap: '0.5rem' }}>
-            <button className="sp-btn-secondary" onClick={() => setShowLogin(true)}>Sign in</button>
-            <button className="sp-btn-primary" onClick={() => setShowRegister(true)}>Register</button>
+          <div style={{ display: 'flex', justifyContent: 'flex-end', gap: '0.5rem', marginBottom: '0.5rem' }}>
+            <button className="sp-btn-secondary" style={{ padding: '0.5rem 1rem' }} onClick={() => { setShowLogin(true); setShowRegister(false); }}>Sign in</button>
+            <button className="sp-btn-primary" style={{ padding: '0.5rem 1rem' }} onClick={() => { setShowRegister(true); setShowLogin(false); }}>Register</button>
           </div>
 
-          {showLogin && (
-            <div style={{ marginTop: '1rem', textAlign: 'left', padding: '1rem', borderRadius: 8, background: 'var(--sp-bg-tertiary)' }}>
-              <h3 style={{ marginBottom: '0.5rem' }}>Sign in</h3>
-              <label style={{ fontSize: '0.9rem', color: 'var(--sp-text-secondary)' }}>Email</label>
-              <input style={{ width: '100%', marginBottom: '0.6rem', padding: '0.6rem', borderRadius: 6, background: 'var(--sp-bg-secondary)', border: '1px solid var(--sp-border-color)', color: 'var(--sp-text-primary)' }} type="email" placeholder="you@domain.com" value={authEmail} onChange={e => setAuthEmail(e.target.value)} />
-              <label style={{ fontSize: '0.9rem', color: 'var(--sp-text-secondary)' }}>Password</label>
-              <input style={{ width: '100%', marginBottom: '0.6rem', padding: '0.6rem', borderRadius: 6, background: 'var(--sp-bg-secondary)', border: '1px solid var(--sp-border-color)', color: 'var(--sp-text-primary)' }} placeholder="Password" type="password" value={authPassword} onChange={e => setAuthPassword(e.target.value)} />
-              {authError && <div style={{ color: 'var(--sp-accent-coral)', marginBottom: '0.6rem' }}>{authError}</div>}
-              <div style={{ marginTop: '0.5rem', display: 'flex', gap: '0.5rem' }}>
-                <button className="sp-btn-primary" disabled={loginMutation.isPending || !authEmail || !authPassword} onClick={async () => {
-                  setAuthError(null);
-                  try {
-                    const data = await loginMutation.mutateAsync({ data: { email: authEmail, password: authPassword } });
-                    const profile = (data as any).user?.profile;
-                    if (profile) {
-                      const rag = new RAGSystem();
-                      rag.setUserProfile(profile);
-                      setRagSystem(rag);
-                      setLanguage(profile.language || 'English');
-                      setStage('mentor');
-                      localStorage.setItem('sahipath_profile', JSON.stringify(profile));
-                    }
-                    setShowLogin(false);
-                  } catch (err: any) {
-                    setAuthError(err?.data?.error || 'Login failed');
-                  }
-                }}>{loginMutation.isPending ? 'Signing in...' : 'Sign in'}</button>
-                <button className="sp-btn-secondary" style={{ marginLeft: 'auto' }} onClick={() => { setShowLogin(false); setAuthError(null); }}>Cancel</button>
+          {(showLogin || showRegister) && (
+            <div style={{ marginBottom: '1rem', padding: '1.2rem', borderRadius: 8, background: 'var(--sp-bg-tertiary)', border: '1px solid var(--sp-border-color)' }}>
+              <h3 style={{ marginBottom: '0.8rem', marginTop: 0 }}>{showLogin ? '🔐 Sign in to SahiPath' : '📝 Create Account'}</h3>
+              <div style={{ display: 'flex', flexDirection: 'column', gap: '0.6rem' }}>
+                <div>
+                  <label style={{ fontSize: '0.85rem', color: 'var(--sp-text-secondary)', display: 'block', marginBottom: '0.3rem' }}>Email address (e.g. you@gmail.com)</label>
+                  <input
+                    type="email"
+                    placeholder="your@email.com"
+                    value={authEmail}
+                    onChange={e => setAuthEmail(e.target.value)}
+                    style={{ width: '100%', padding: '0.65rem', borderRadius: 6, background: 'var(--sp-bg-secondary)', border: `1px solid ${authError ? 'var(--sp-accent-coral)' : 'var(--sp-border-color)'}`, color: 'var(--sp-text-primary)' }}
+                  />
+                </div>
+                <div>
+                  <label style={{ fontSize: '0.85rem', color: 'var(--sp-text-secondary)', display: 'block', marginBottom: '0.3rem' }}>Password</label>
+                  <input
+                    type="password"
+                    placeholder={showRegister ? 'Minimum 6 characters' : 'Your password'}
+                    value={authPassword}
+                    onChange={e => setAuthPassword(e.target.value)}
+                    onKeyDown={e => { if (e.key === 'Enter') e.currentTarget.closest('form')?.requestSubmit(); }}
+                    style={{ width: '100%', padding: '0.65rem', borderRadius: 6, background: 'var(--sp-bg-secondary)', border: `1px solid ${authError ? 'var(--sp-accent-coral)' : 'var(--sp-border-color)'}`, color: 'var(--sp-text-primary)' }}
+                  />
+                </div>
+                {authError && (
+                  <div style={{ padding: '0.5rem 0.8rem', background: 'rgba(255,107,107,0.1)', border: '1px solid var(--sp-accent-coral)', borderRadius: 6, color: 'var(--sp-accent-coral)', fontSize: '0.85rem' }}>
+                    {authError === 'Invalid credentials' ? '❌ Wrong email or password. Check and try again, or register.' : authError}
+                  </div>
+                )}
+                <div style={{ display: 'flex', gap: '0.5rem', marginTop: '0.2rem' }}>
+                  {showLogin ? (
+                    <button className="sp-btn-primary" disabled={loginMutation.isPending || !authEmail || !authPassword}
+                      onClick={async () => {
+                        setAuthError(null);
+                        if (!authEmail.includes('@')) { setAuthError('Please enter a valid email (e.g. you@gmail.com)'); return; }
+                        try {
+                          const data = await loginMutation.mutateAsync({ data: { email: authEmail.trim(), password: authPassword } });
+                          const profile = (data as any).user?.profile;
+                          setIsLoggedIn(true);
+                          if (profile) {
+                            const rag = new RAGSystem();
+                            rag.setUserProfile(profile);
+                            setRagSystem(rag);
+                            setLanguage(profile.language || 'English');
+                            setStage('mentor');
+                            localStorage.setItem('sahipath_profile', JSON.stringify(profile));
+                            setChatMessages([{ role: 'assistant', text: `Welcome back, ${profile.firstName}! Ready to continue your career journey?` }]);
+                          } else {
+                            setLanguage('English');
+                            setStage('personal');
+                          }
+                          setShowLogin(false);
+                        } catch (err: any) {
+                          setAuthError(err?.data?.error || err?.message || 'Login failed. Please try again.');
+                        }
+                      }}>
+                      {loginMutation.isPending ? '⏳ Signing in...' : 'Sign in'}
+                    </button>
+                  ) : (
+                    <button className="sp-btn-primary" disabled={registerMutation.isPending || !authEmail || !authPassword}
+                      onClick={async () => {
+                        setAuthError(null);
+                        if (!authEmail.includes('@')) { setAuthError('Please enter a valid email (e.g. you@gmail.com)'); return; }
+                        if (authPassword.length < 6) { setAuthError('Password must be at least 6 characters'); return; }
+                        try {
+                          await registerMutation.mutateAsync({ data: { email: authEmail.trim(), password: authPassword } });
+                          setIsLoggedIn(true);
+                          setAuthError(null);
+                          showToast('✅ Account created! Please complete your profile.');
+                          setLanguage('English');
+                          setShowRegister(false);
+                          setStage('personal');
+                          setPersonalData(p => ({ ...p, email: authEmail.trim() }));
+                        } catch (err: any) {
+                          setAuthError(err?.data?.error || err?.message || 'Registration failed.');
+                        }
+                      }}>
+                      {registerMutation.isPending ? '⏳ Creating account...' : 'Create Account'}
+                    </button>
+                  )}
+                  <button className="sp-btn-secondary" onClick={() => { setShowLogin(false); setShowRegister(false); setAuthError(null); }}>Cancel</button>
+                  {showLogin && <button className="sp-btn-secondary" style={{ marginLeft: 'auto', fontSize: '0.8rem' }} onClick={() => { setShowLogin(false); setShowRegister(true); setAuthError(null); }}>No account? Register</button>}
+                  {showRegister && <button className="sp-btn-secondary" style={{ marginLeft: 'auto', fontSize: '0.8rem' }} onClick={() => { setShowRegister(false); setShowLogin(true); setAuthError(null); }}>Already registered? Sign in</button>}
+                </div>
               </div>
             </div>
           )}
 
-          {showRegister && (
-            <div style={{ marginTop: '1rem', textAlign: 'left', padding: '1rem', borderRadius: 8, background: 'var(--sp-bg-tertiary)' }}>
-              <h3 style={{ marginBottom: '0.5rem' }}>Create account</h3>
-              <label style={{ fontSize: '0.9rem', color: 'var(--sp-text-secondary)' }}>Email</label>
-              <input style={{ width: '100%', marginBottom: '0.6rem', padding: '0.6rem', borderRadius: 6, background: 'var(--sp-bg-secondary)', border: '1px solid var(--sp-border-color)', color: 'var(--sp-text-primary)' }} type="email" placeholder="you@domain.com" value={authEmail} onChange={e => setAuthEmail(e.target.value)} />
-              <label style={{ fontSize: '0.9rem', color: 'var(--sp-text-secondary)' }}>Password</label>
-              <input style={{ width: '100%', marginBottom: '0.6rem', padding: '0.6rem', borderRadius: 6, background: 'var(--sp-bg-secondary)', border: '1px solid var(--sp-border-color)', color: 'var(--sp-text-primary)' }} placeholder="Choose a strong password" type="password" value={authPassword} onChange={e => setAuthPassword(e.target.value)} />
-              {authError && <div style={{ color: 'var(--sp-accent-coral)', marginBottom: '0.6rem' }}>{authError}</div>}
-              <div style={{ marginTop: '0.5rem', display: 'flex', gap: '0.5rem' }}>
-                <button className="sp-btn-primary" disabled={registerMutation.isPending || !authEmail || !authPassword} onClick={async () => {
-                  setAuthError(null);
-                  try {
-                    const basicProfile = { language: language || 'English', firstName: '', lastName: '', email: authEmail, currentRole: '', yearsOfExperience: 0, skills: [], careerInterests: [], currentGoals: '', challenges: '', availableHoursPerWeek: 0, preferredLearningStyle: 'Interactive', createdAt: new Date().toISOString(), updatedAt: new Date().toISOString() };
-                    await registerMutation.mutateAsync({ data: { email: authEmail, password: authPassword, profile: basicProfile } });
-                    alert('Registered successfully — you can sign in now.');
-                    setShowRegister(false);
-                  } catch (err: any) {
-                    setAuthError(err?.data?.error || 'Register failed');
-                  }
-                }}>{registerMutation.isPending ? 'Creating...' : 'Create account'}</button>
-                <button className="sp-btn-secondary" style={{ marginLeft: 'auto' }} onClick={() => { setShowRegister(false); setAuthError(null); }}>Cancel</button>
-              </div>
-            </div>
-          )}
-
-          <div style={{ marginBottom: '2rem', textAlign: 'center' }}>
-            <h1 style={{ fontSize: '2.5rem', marginBottom: '0.5rem', background: 'linear-gradient(135deg, var(--sp-accent-teal), var(--sp-accent-orange))', WebkitBackgroundClip: 'text', WebkitTextFillColor: 'transparent', backgroundClip: 'text' }}>
-              🚀 SahiPath
-            </h1>
-            <p style={{ fontSize: '1rem', color: 'var(--sp-text-secondary)', marginBottom: '1rem' }}>
-              Your Personal AI Career Mentor
-            </p>
+          <div style={{ textAlign: 'center', marginBottom: '2rem' }}>
+            <h1 style={{ fontSize: '2.5rem', marginBottom: '0.5rem' }}>🚀 SahiPath</h1>
+            <p style={{ fontSize: '1rem', color: 'var(--sp-text-secondary)' }}>Your Personal AI Career Mentor</p>
           </div>
 
           <h2 style={{ textAlign: 'center', marginBottom: '1.5rem', fontSize: '1.3rem' }}>🌍 Choose Your Language</h2>
 
           <div style={{ marginBottom: '2rem' }}>
-            <h3 style={{ textAlign: 'center', fontSize: '1rem', color: 'var(--sp-text-secondary)', marginBottom: '1rem' }}>
-              🇮🇳 Languages from India
-            </h3>
+            <h3 style={{ textAlign: 'center', fontSize: '1rem', color: 'var(--sp-text-secondary)', marginBottom: '1rem' }}>🇮🇳 Languages from India</h3>
             <div className="sp-language-grid">
-              {indianLanguages.map(lang => (
-                <button key={lang} onClick={() => handleLanguageSelect(lang)} className="sp-language-btn">
-                  <div className="sp-lang-emoji">{(languageInfo as any)[lang].emoji}</div>
-                  <div className="sp-lang-name">{lang}</div>
-                  <div className="sp-lang-subtitle">{(languageInfo as any)[lang].nativeName}</div>
+              {indLangs.map(l => (
+                <button key={l} onClick={() => { setLanguage(l); setRagSystem(new RAGSystem()); setStage('personal'); }} className="sp-language-btn">
+                  <div className="sp-lang-emoji">{(languageInfo as any)[l].emoji}</div>
+                  <div className="sp-lang-name">{l}</div>
+                  <div className="sp-lang-subtitle">{(languageInfo as any)[l].nativeName}</div>
                 </button>
               ))}
             </div>
           </div>
 
           <div>
-            <h3 style={{ textAlign: 'center', fontSize: '1rem', color: 'var(--sp-text-secondary)', marginBottom: '1rem' }}>
-              🌎 Languages Worldwide
-            </h3>
+            <h3 style={{ textAlign: 'center', fontSize: '1rem', color: 'var(--sp-text-secondary)', marginBottom: '1rem' }}>🌎 Languages Worldwide</h3>
             <div className="sp-language-grid">
-              {globalLanguages.map(lang => (
-                <button key={lang} onClick={() => handleLanguageSelect(lang)} className="sp-language-btn">
-                  <div className="sp-lang-emoji">{(languageInfo as any)[lang].emoji}</div>
-                  <div className="sp-lang-name">{lang}</div>
-                  <div className="sp-lang-subtitle">{(languageInfo as any)[lang].nativeName}</div>
+              {globalLangs.map(l => (
+                <button key={l} onClick={() => { setLanguage(l); setRagSystem(new RAGSystem()); setStage('personal'); }} className="sp-language-btn">
+                  <div className="sp-lang-emoji">{(languageInfo as any)[l].emoji}</div>
+                  <div className="sp-lang-name">{l}</div>
+                  <div className="sp-lang-subtitle">{(languageInfo as any)[l].nativeName}</div>
                 </button>
               ))}
             </div>
           </div>
         </div>
+
+        {toastMsg && <div className="sp-toast">{toastMsg}</div>}
       </div>
     );
   }
 
   if (!language || !t) return null;
 
-  // STAGE: Personal Details
+  // ------- STAGE: Personal Details -------
   if (stage === 'personal') {
     return (
       <div className="sp-container sp-form-container">
+        {toastMsg && <div className="sp-toast">{toastMsg}</div>}
         <div className="sp-card sp-form-card">
           <h1>👤 {t['personal_details'] || 'Personal Details'}</h1>
           <p className="sp-form-subtitle">{t['tell_us_about'] || 'Tell us about yourself'}</p>
+          <p style={{ fontSize: '0.82rem', color: 'var(--sp-text-secondary)', marginBottom: '1.2rem' }}>
+            🎤 Tap the mic icon next to any field to fill it by speaking
+          </p>
           <form onSubmit={handlePersonalSubmit} className="sp-form">
             <div className="sp-form-row">
-              <input type="text" placeholder={t['firstName'] || 'First Name *'} value={personalData.firstName} onChange={e => setPersonalData({ ...personalData, firstName: e.target.value })} required />
-              <input type="text" placeholder={t['lastName'] || 'Last Name'} value={personalData.lastName} onChange={e => setPersonalData({ ...personalData, lastName: e.target.value })} />
+              <VoiceRow lang={lang} label={t['firstName'] || 'First Name *'} value={personalData.firstName} onChange={v => setPersonalData(p => ({ ...p, firstName: v }))} required />
+              <VoiceRow lang={lang} label={t['lastName'] || 'Last Name'} value={personalData.lastName} onChange={v => setPersonalData(p => ({ ...p, lastName: v }))} />
             </div>
             <div className="sp-form-row">
-              <input type="number" placeholder={t['age'] || 'Age'} value={personalData.age} onChange={e => setPersonalData({ ...personalData, age: e.target.value })} />
-              <input type="email" placeholder={t['email'] || 'Email *'} value={personalData.email} onChange={e => setPersonalData({ ...personalData, email: e.target.value })} required />
+              <VoiceRow lang={lang} label={t['age'] || 'Age'} type="number" value={personalData.age} onChange={v => setPersonalData(p => ({ ...p, age: v }))} />
+              <VoiceRow lang={lang} label="Email address *" type="email" placeholder="your@email.com" value={personalData.email} onChange={v => setPersonalData(p => ({ ...p, email: v }))} required />
             </div>
             <div className="sp-form-row">
-              <input type="text" placeholder={t['location'] || 'Location'} value={personalData.location} onChange={e => setPersonalData({ ...personalData, location: e.target.value })} />
-              <select value={personalData.educationLevel} onChange={e => setPersonalData({ ...personalData, educationLevel: e.target.value })}>
+              <VoiceRow lang={lang} label={t['location'] || 'City, Country'} value={personalData.location} onChange={v => setPersonalData(p => ({ ...p, location: v }))} />
+              <VoiceRow lang={lang} label="Education Level" as="select" value={personalData.educationLevel} onChange={v => setPersonalData(p => ({ ...p, educationLevel: v }))}>
                 <option>{t['edu_highschool'] || 'High School'}</option>
                 <option>{t['edu_bachelor'] || "Bachelor's"}</option>
                 <option>{t['edu_master'] || "Master's"}</option>
                 <option>{t['edu_phd'] || 'PhD'}</option>
-              </select>
+              </VoiceRow>
             </div>
             <div className="sp-form-row">
-              <input type="text" placeholder={t['currentRole'] || 'Current Role *'} value={personalData.currentRole} onChange={e => setPersonalData({ ...personalData, currentRole: e.target.value })} required />
-              <input type="number" placeholder={t['yearsExp'] || 'Years of Experience'} value={personalData.yearsOfExperience} onChange={e => setPersonalData({ ...personalData, yearsOfExperience: e.target.value })} />
+              <VoiceRow lang={lang} label={t['currentRole'] || 'Current Role *'} value={personalData.currentRole} onChange={v => setPersonalData(p => ({ ...p, currentRole: v }))} required />
+              <VoiceRow lang={lang} label={t['yearsExp'] || 'Years of Experience'} type="number" value={personalData.yearsOfExperience} onChange={v => setPersonalData(p => ({ ...p, yearsOfExperience: v }))} />
             </div>
             <button type="submit" className="sp-btn-primary sp-form-btn">{t['next'] || 'Next'} →</button>
+            {isLoggedIn && <button type="button" className="sp-btn-secondary" onClick={() => setStage('language')} style={{ marginTop: '0.5rem' }}>← Back</button>}
           </form>
         </div>
       </div>
     );
   }
 
-  // STAGE: Professional Details
+  // ------- STAGE: Professional Details -------
   if (stage === 'professional') {
     return (
       <div className="sp-container sp-form-container">
+        {toastMsg && <div className="sp-toast">{toastMsg}</div>}
         <div className="sp-card sp-form-card">
           <h1>💼 {t['professional_details'] || 'Professional Details'}</h1>
           <p className="sp-form-subtitle">{t['career_info'] || 'Tell us about your career goals'}</p>
+          <p style={{ fontSize: '0.82rem', color: 'var(--sp-text-secondary)', marginBottom: '1.2rem' }}>
+            🎤 Tap the mic icon to speak your answers
+          </p>
           <form onSubmit={handleProfessionalSubmit} className="sp-form">
-            <textarea placeholder={t['skills'] || 'Skills (comma-separated) *'} value={professionalData.skills} onChange={e => setProfessionalData({ ...professionalData, skills: e.target.value })} required rows={2} />
-            <textarea placeholder={t['interests'] || 'Career Interests (comma-separated) *'} value={professionalData.careerInterests} onChange={e => setProfessionalData({ ...professionalData, careerInterests: e.target.value })} required rows={2} />
-            <textarea placeholder={t['goals'] || 'Current Goals *'} value={professionalData.currentGoals} onChange={e => setProfessionalData({ ...professionalData, currentGoals: e.target.value })} required rows={2} />
-            <textarea placeholder={t['challenges'] || 'Challenges'} value={professionalData.challenges} onChange={e => setProfessionalData({ ...professionalData, challenges: e.target.value })} rows={2} />
+            <VoiceRow lang={lang} label={t['skills'] || 'Skills (comma-separated) *'} as="textarea" value={professionalData.skills} onChange={v => setProfessionalData(p => ({ ...p, skills: v }))} required />
+            <VoiceRow lang={lang} label={t['interests'] || 'Career Interests (comma-separated) *'} as="textarea" value={professionalData.careerInterests} onChange={v => setProfessionalData(p => ({ ...p, careerInterests: v }))} required />
+            <VoiceRow lang={lang} label={t['goals'] || 'Current Goals *'} as="textarea" value={professionalData.currentGoals} onChange={v => setProfessionalData(p => ({ ...p, currentGoals: v }))} required />
+            <VoiceRow lang={lang} label={t['challenges'] || 'Challenges'} as="textarea" value={professionalData.challenges} onChange={v => setProfessionalData(p => ({ ...p, challenges: v }))} />
             <div className="sp-form-row">
-              <input type="number" placeholder={t['hoursPerWeek'] || 'Hours available per week'} value={professionalData.availableHoursPerWeek} onChange={e => setProfessionalData({ ...professionalData, availableHoursPerWeek: e.target.value })} />
-              <select value={professionalData.preferredLearningStyle} onChange={e => setProfessionalData({ ...professionalData, preferredLearningStyle: e.target.value })}>
+              <VoiceRow lang={lang} label={t['hoursPerWeek'] || 'Hours/week'} type="number" value={professionalData.availableHoursPerWeek} onChange={v => setProfessionalData(p => ({ ...p, availableHoursPerWeek: v }))} />
+              <VoiceRow lang={lang} label="Learning Style" as="select" value={professionalData.preferredLearningStyle} onChange={v => setProfessionalData(p => ({ ...p, preferredLearningStyle: v }))}>
                 <option>Interactive</option>
                 <option>Visual</option>
                 <option>Reading</option>
                 <option>Practice-based</option>
-              </select>
+              </VoiceRow>
             </div>
             <div className="sp-form-buttons">
               <button type="button" onClick={() => setStage('personal')} className="sp-btn-secondary sp-form-btn">← {t['back'] || 'Back'}</button>
-              <button type="submit" className="sp-btn-primary sp-form-btn">{t['startMentoring'] || 'Start Mentoring'} →</button>
+              <button type="submit" className="sp-btn-primary sp-form-btn" disabled={saveProfileMutation.isPending}>
+                {saveProfileMutation.isPending ? '⏳ Saving...' : `${t['startMentoring'] || 'Start Mentoring'} →`}
+              </button>
             </div>
           </form>
         </div>
@@ -417,173 +505,154 @@ export default function App() {
     );
   }
 
-  // STAGE: Mentor
-  if (stage === 'mentor') {
-    const profile = ragSystem?.getUserProfile();
+  // ------- STAGE: Mentor -------
+  const profile = ragSystem?.getUserProfile() || null;
 
-    return (
-      <div className="sp-container sp-mentor-main">
-        <div className="sp-mentor-header">
-          <h1>🤖 {t['mentorChat'] || 'AI Career Mentor'} - <span style={{ color: 'var(--sp-accent-teal)' }}>{profile?.firstName} {profile?.lastName}</span></h1>
-          <p className="sp-mentor-subtitle">{t['rag_intro'] || '24/7 AI Assistant powered by your personal career context'}</p>
-        </div>
+  return (
+    <div className="sp-container sp-mentor-main">
+      {toastMsg && <div className="sp-toast">{toastMsg}</div>}
 
-        <div className="sp-mentor-layout">
-          <div className="sp-mentor-sidebar">
-            <div className="sp-card sp-profile-card">
-              <h3>📋 {t['profile_summary'] || 'Your Profile'}</h3>
-              <ul className="sp-profile-list">
-                <li><strong>{t['role'] || 'Role'}:</strong> {profile?.currentRole}</li>
-                <li><strong>{t['yearsExp'] || 'Experience'}:</strong> {profile?.yearsOfExperience} {t['years'] || 'years'}</li>
-                <li><strong>{t['goals'] || 'Goals'}:</strong> {profile?.currentGoals}</li>
-                <li><strong>{t['hoursPerWeek'] || 'Hours/Week'}:</strong> {profile?.availableHoursPerWeek} {t['hours'] || 'hours'}</li>
-                <li><strong>{t['learningStyle'] || 'Learning Style'}:</strong> {profile?.preferredLearningStyle}</li>
-              </ul>
-              <h3 style={{ marginTop: '1.5rem' }}>🎯 {t['skills'] || 'Skills'}</h3>
-              <div className="sp-skills-tags">
-                {profile?.skills.map(skill => <span key={skill} className="sp-skill-tag">{skill}</span>)}
-              </div>
-              <div style={{ marginTop: '1rem', display: 'grid', gap: '0.6rem' }}>
-                {(['chat', 'performance', 'tests', 'resume', 'jobs', 'media'] as const).map(v => (
-                  <button key={v} onClick={() => setView(v)} className={`sp-btn-secondary${view === v ? ' sp-btn-active' : ''}`}>
-                    {v === 'chat' ? '💬 Chat' : v === 'performance' ? '📈 Performance' : v === 'tests' ? '📝 Tests' : v === 'resume' ? '📄 Resume' : v === 'jobs' ? '💼 Jobs' : '🎙️ Media'}
-                  </button>
-                ))}
-                <button onClick={() => {
-                  logoutMutation.mutate({});
-                  setStage('language');
-                  setLanguage(null);
-                  setRagSystem(null);
-                  localStorage.removeItem('sahipath_profile');
-                }} className="sp-btn-secondary">🔄 {t['restart'] || 'Restart'}</button>
-              </div>
-            </div>
-          </div>
+      <div className="sp-mentor-header">
+        <h1>🤖 {t['mentorChat'] || 'AI Career Mentor'}
+          {profile?.firstName && <span style={{ WebkitTextFillColor: 'var(--sp-text-primary)', background: 'none' }}> — <span style={{ color: 'var(--sp-accent-teal)', WebkitTextFillColor: 'var(--sp-accent-teal)' }}>{profile.firstName}</span></span>}
+        </h1>
+        <p className="sp-mentor-subtitle">{t['rag_intro'] || '24/7 AI Assistant powered by your personal career context'}</p>
+      </div>
 
-          <div className="sp-mentor-chat">
-            <div className="sp-chat-messages">
-              {chatMessages.map((msg, i) => (
-                <div key={i} className={`sp-message sp-message-${msg.role}`}>
-                  <span className="sp-msg-emoji">{msg.role === 'assistant' ? '🤖' : '👤'}</span>
-                  <div className="sp-message-content">{msg.text}</div>
-                </div>
-              ))}
-              {mentorChatMutation.isPending && (
-                <div className="sp-message sp-message-assistant">
-                  <span className="sp-msg-emoji">🤖</span>
-                  <div className="sp-message-content sp-typing">Thinking...</div>
-                </div>
-              )}
-              <div ref={chatBottomRef} />
-            </div>
-
-            {view === 'chat' && (
+      <div className="sp-mentor-layout">
+        <div className="sp-mentor-sidebar">
+          <div className="sp-profile-card">
+            <h3 style={{ marginTop: 0 }}>📋 {t['profile_summary'] || 'Your Profile'}</h3>
+            <ul className="sp-profile-list">
+              <li><strong>{t['role'] || 'Role'}:</strong> {profile?.currentRole || '—'}</li>
+              <li><strong>Exp:</strong> {profile?.yearsOfExperience ?? '—'} {t['years'] || 'years'}</li>
+              <li><strong>{t['goals'] || 'Goals'}:</strong> {profile?.currentGoals?.slice(0, 50) || '—'}</li>
+              <li><strong>Hours/Week:</strong> {profile?.availableHoursPerWeek || '—'}</li>
+              <li><strong>Style:</strong> {profile?.preferredLearningStyle || '—'}</li>
+            </ul>
+            {profile?.skills?.length ? (
               <>
-                <form onSubmit={handleChatSubmit} className="sp-chat-form">
-                  <input type="text" value={chatInput} onChange={e => setChatInput(e.target.value)} placeholder={t['askAnything'] || 'Ask me anything...'} className="sp-chat-input" />
-                  <button type="button" onClick={() => startListening(twoPersonMode)} className="sp-btn-secondary" title={twoPersonMode ? 'Start or stop two-person voice chat' : 'Use microphone'} style={{ marginRight: '0.5rem' }}>
-                    {isListening ? '🎤 Listening...' : twoPersonMode ? '🎤 Voice Chat' : '🎤'}
-                  </button>
-                  <label style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', cursor: 'pointer', whiteSpace: 'nowrap' }}>
-                    <input type="checkbox" checked={twoPersonMode} onChange={e => { setTwoPersonMode(e.target.checked); if (!e.target.checked) stopListening(); }} />
-                    Two-person AI
-                  </label>
-                  <button type="submit" className="sp-btn-primary" disabled={mentorChatMutation.isPending}>{t['send'] || 'Send'}</button>
-                </form>
-                <div style={{ padding: '0.4rem 1rem', fontSize: '0.8rem', color: 'var(--sp-text-secondary)' }}>
-                  {twoPersonMode ? 'Two-person AI will listen and speak while the tab stays open.' : 'Typed or mic-transcribed messages return text only.'}
+                <h3 style={{ marginTop: '1rem' }}>🎯 {t['skills'] || 'Skills'}</h3>
+                <div className="sp-skills-tags">
+                  {profile.skills.map(s => <span key={s} className="sp-skill-tag">{s}</span>)}
                 </div>
               </>
-            )}
-
-            {view === 'performance' && (
-              <div style={{ padding: '1rem', overflowY: 'auto' }}>
-                <h3>Performance Summary</h3>
-                <pre style={{ whiteSpace: 'pre-wrap', fontSize: '0.85rem' }}>{JSON.stringify(ragSystem?.getPerformanceSummary(), null, 2)}</pre>
-              </div>
-            )}
-
-            {view === 'tests' && (
-              <div style={{ padding: '1rem', overflowY: 'auto' }}>
-                <h3>Test Records</h3>
-                <form onSubmit={async (e) => {
-                  e.preventDefault();
-                  if (!ragSystem) return;
-                  const rec = ragSystem.recordTestResult({ name: 'Sample Test', score: 80 });
-                  try {
-                    await recordTestMutation.mutateAsync({ data: { name: rec.name, score: rec.score } });
-                    setChatMessages(prev => [...prev, { role: 'assistant', text: `Recorded test: ${rec.name} (${rec.score})` }]);
-                  } catch {}
-                }}>
-                  <button className="sp-btn-primary" type="submit">Record Sample Test</button>
-                </form>
-                <div style={{ marginTop: '1rem' }}>
-                  <pre style={{ whiteSpace: 'pre-wrap', fontSize: '0.85rem' }}>{JSON.stringify(ragSystem?.getTestHistory(), null, 2)}</pre>
-                </div>
-              </div>
-            )}
-
-            {view === 'resume' && (
-              <div style={{ padding: '1rem' }}>
-                <h3>Resume Builder</h3>
-                <button className="sp-btn-primary" onClick={() => {
-                  if (!profile) return;
-                  const resume = `Resume - ${profile.firstName} ${profile.lastName}\nRole: ${profile.currentRole}\nExperience: ${profile.yearsOfExperience} years\nSkills: ${profile.skills.join(', ')}\nGoals: ${profile.currentGoals}`;
-                  const blob = new Blob([resume], { type: 'text/plain' });
-                  const url = URL.createObjectURL(blob);
-                  const a = document.createElement('a');
-                  a.href = url;
-                  a.download = `${profile.firstName}_${profile.lastName}_resume.txt`;
-                  a.click();
-                }}>Generate Resume (TXT)</button>
-                <button className="sp-btn-secondary" style={{ marginLeft: '0.6rem' }} onClick={() => alert('To enable PDF resume generation, install jspdf.')}>Generate Resume (PDF)</button>
-              </div>
-            )}
-
-            {view === 'jobs' && (
-              <div style={{ padding: '1rem' }}>
-                <h3>Job / Internship Suggestions</h3>
-                <button className="sp-btn-primary" onClick={() => {
-                  const jobs = ragSystem?.suggestJobs(careerData) || [];
-                  setChatMessages(prev => [...prev, { role: 'assistant', text: `Found ${jobs.length} suggested roles:\n${jobs.map((j: any) => `• ${j.role} (${j.type}) — ${j.path}`).join('\n')}` }]);
-                  setView('chat');
-                }}>Suggest Jobs</button>
-              </div>
-            )}
-
-            {view === 'media' && (
-              <div style={{ padding: '1rem' }}>
-                <h3>AI Media (Podcast / Image / Video)</h3>
-                <div style={{ display: 'flex', gap: '0.5rem', flexWrap: 'wrap' }}>
-                  <button className="sp-btn-secondary" onClick={async () => {
-                    try {
-                      const data = await fetch('/api/media', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ type: 'podcast', prompt: 'Short career advice podcast' }) }).then(r => r.json());
-                      setChatMessages(prev => [...prev, { role: 'assistant', text: `Podcast generated: ${data.note || data.url ? 'ready' : 'failed'}` }]);
-                      if (data?.url?.startsWith('data:audio')) {
-                        const a = document.createElement('audio'); a.src = data.url; a.controls = true; a.autoplay = false;
-                        const w = window.open('', '_blank'); if (w) { w.document.write('<h3>Podcast</h3>'); w.document.body.appendChild(a); }
-                      }
-                    } catch { setChatMessages(prev => [...prev, { role: 'assistant', text: 'Media generation failed. Check OPENAI_API_KEY is set.' }]); }
-                  }}>Generate Podcast</button>
-                  <button className="sp-btn-secondary" onClick={async () => {
-                    try {
-                      const data = await fetch('/api/media', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ type: 'image', prompt: 'Professional career banner' }) }).then(r => r.json());
-                      if (data?.url?.startsWith('data:image') || data?.url?.startsWith('https')) {
-                        const w = window.open(''); if (w) { const img = w.document.createElement('img'); img.src = data.url; img.style.maxWidth = '100%'; w.document.body.appendChild(img); }
-                      }
-                      setChatMessages(prev => [...prev, { role: 'assistant', text: `Image generated: ${data.url ? 'ready' : data.error || 'failed'}` }]);
-                    } catch { setChatMessages(prev => [...prev, { role: 'assistant', text: 'Image generation failed. Check OPENAI_API_KEY is set.' }]); }
-                  }}>Generate Image</button>
-                  <button className="sp-btn-secondary" onClick={() => setChatMessages(prev => [...prev, { role: 'assistant', text: 'Video generation requires a third-party service. Contact support to enable.' }])}>Generate Video</button>
-                  <button className="sp-btn-secondary" onClick={() => alert('To enable PPTX generation, install pptxgenjs.')}>Generate PPTX</button>
-                </div>
-              </div>
-            )}
+            ) : null}
+            <div style={{ marginTop: '1.2rem', display: 'grid', gap: '0.5rem' }}>
+              {([
+                ['chat', '💬 Chat'],
+                ['performance', '📈 Performance'],
+                ['tests', '📝 Tests'],
+                ['resume', '📄 Resume'],
+                ['jobs', '💼 Jobs'],
+                ['media', '🎙️ Media'],
+              ] as const).map(([v, label]) => (
+                <button key={v} onClick={() => setView(v as any)} className={`sp-btn-secondary${view === v ? ' sp-btn-active' : ''}`} style={{ padding: '0.6rem', textAlign: 'left', fontSize: '0.85rem' }}>
+                  {label}
+                </button>
+              ))}
+              <button onClick={handleLogout} className="sp-btn-secondary" style={{ padding: '0.6rem', fontSize: '0.85rem', marginTop: '0.3rem' }}>
+                🔄 {t['restart'] || 'Restart'}
+              </button>
+            </div>
           </div>
         </div>
-      </div>
-    );
-  }
 
-  return null;
+        <div className="sp-mentor-chat">
+          {view === 'chat' && (
+            <>
+              <div className="sp-chat-messages">
+                {chatMessages.length === 0 && (
+                  <div style={{ color: 'var(--sp-text-secondary)', textAlign: 'center', padding: '2rem', fontSize: '0.9rem' }}>
+                    Ask your mentor anything — career advice, study plans, skill gaps, interview prep...
+                  </div>
+                )}
+                {chatMessages.map((msg, i) => (
+                  <div key={i} className={`sp-message sp-message-${msg.role}`}>
+                    <span className="sp-msg-emoji">{msg.role === 'assistant' ? '🤖' : '👤'}</span>
+                    <div className="sp-message-content">{msg.text}</div>
+                  </div>
+                ))}
+                {mentorMutation.isPending && (
+                  <div className="sp-message sp-message-assistant">
+                    <span className="sp-msg-emoji">🤖</span>
+                    <div className="sp-message-content sp-typing">Thinking...</div>
+                  </div>
+                )}
+                <div ref={chatBottomRef} />
+              </div>
+              <form onSubmit={handleChatSubmit} className="sp-chat-form">
+                <input type="text" value={chatInput} onChange={e => setChatInput(e.target.value)} placeholder={t['askAnything'] || 'Ask me anything...'} className="sp-chat-input" />
+                <button type="button" title={isListening ? 'Listening... click to stop' : 'Use microphone'}
+                  onClick={() => isListening ? stopListening() : startListening(twoPersonMode)}
+                  style={{ background: isListening ? 'var(--sp-accent-coral)' : 'var(--sp-bg-tertiary)', border: `1px solid ${isListening ? 'var(--sp-accent-coral)' : 'var(--sp-border-color)'}`, borderRadius: 8, padding: '0.6rem 0.8rem', cursor: 'pointer', color: 'var(--sp-text-primary)', animation: isListening ? 'spPulse 1s infinite' : 'none' }}>
+                  {isListening ? '🔴' : '🎤'}
+                </button>
+                <label style={{ display: 'flex', alignItems: 'center', gap: '0.4rem', cursor: 'pointer', whiteSpace: 'nowrap', fontSize: '0.8rem', color: 'var(--sp-text-secondary)' }}>
+                  <input type="checkbox" checked={twoPersonMode} onChange={e => { setTwoPersonMode(e.target.checked); if (!e.target.checked) stopListening(); }} />
+                  Two-person AI
+                </label>
+                <button type="submit" className="sp-btn-primary" disabled={mentorMutation.isPending} style={{ padding: '0.7rem 1.2rem' }}>{t['send'] || 'Send'}</button>
+              </form>
+              <div style={{ padding: '0.3rem 1rem 0.5rem', fontSize: '0.75rem', color: 'var(--sp-text-secondary)' }}>
+                {isSpeaking ? '🔊 Speaking...' : twoPersonMode ? 'Two-person: AI listens → replies → speaks → repeats' : 'Mic transcribes to input. Two-person mode enables voice conversation.'}
+              </div>
+            </>
+          )}
+
+          {view === 'performance' && <PerformanceView />}
+
+          {view === 'tests' && (
+            <TestsView
+              pendingTopic={pendingTestTopic}
+              onTopicHandled={() => setPendingTestTopic(null)}
+            />
+          )}
+
+          {view === 'resume' && <ResumeView profile={profile} />}
+
+          {view === 'jobs' && <JobsView profile={profile} />}
+
+          {view === 'media' && (
+            <div style={{ padding: '1.5rem' }}>
+              <h3 style={{ marginTop: 0 }}>AI Media Generation</h3>
+              <p style={{ color: 'var(--sp-text-secondary)', fontSize: '0.9rem', marginBottom: '1.2rem' }}>
+                Generate career-related audio podcasts and images using AI. Requires <code style={{ background: 'var(--sp-bg-tertiary)', padding: '0.1rem 0.3rem', borderRadius: 4 }}>OPENAI_API_KEY</code> to be set.
+              </p>
+              <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '0.8rem' }}>
+                {[
+                  { type: 'podcast', label: '🎙️ Career Advice Podcast', prompt: `Generate a 2-minute motivational career advice podcast for someone working as ${profile?.currentRole || 'a professional'} with skills in ${profile?.skills?.slice(0, 3).join(', ') || 'technology'}.` },
+                  { type: 'image', label: '🖼️ Career Success Banner', prompt: `Professional career banner for ${profile?.currentRole || 'a developer'} with skills in ${profile?.skills?.slice(0, 3).join(', ') || 'technology'}. Motivational, dark tech aesthetic.` },
+                ].map(item => (
+                  <button key={item.type} className="sp-btn-secondary" style={{ padding: '1.2rem', fontSize: '0.9rem', textAlign: 'center' }}
+                    onClick={async () => {
+                      showToast('⏳ Generating media...');
+                      try {
+                        const r = await fetch('/api/media', { method: 'POST', headers: { 'Content-Type': 'application/json' }, credentials: 'include', body: JSON.stringify({ type: item.type, prompt: item.prompt }) });
+                        const d = await r.json();
+                        if (!r.ok) { showToast(`❌ ${d.error || 'Failed'}`); return; }
+                        if (item.type === 'podcast' && d.url) {
+                          const w = window.open('', '_blank');
+                          if (w) { w.document.write(`<title>Podcast</title><audio controls autoplay src="${d.url}" style="width:100%;margin:2rem auto;display:block"></audio>`); }
+                          showToast('🎙️ Podcast ready — check the new tab!');
+                        } else if (item.type === 'image' && d.url) {
+                          const w = window.open('', '_blank');
+                          if (w) { w.document.write(`<title>Career Banner</title><img src="${d.url}" style="max-width:100%"/>`); }
+                          showToast('🖼️ Image ready — check the new tab!');
+                        }
+                      } catch { showToast('❌ Media generation failed. Is OPENAI_API_KEY set?'); }
+                    }}>
+                    {item.label}
+                  </button>
+                ))}
+              </div>
+              <div style={{ marginTop: '1rem', padding: '0.8rem', background: 'var(--sp-bg-tertiary)', borderRadius: 8, fontSize: '0.8rem', color: 'var(--sp-text-secondary)' }}>
+                To enable media generation, add <code>OPENAI_API_KEY</code> in Replit Secrets.
+              </div>
+            </div>
+          )}
+        </div>
+      </div>
+    </div>
+  );
 }
