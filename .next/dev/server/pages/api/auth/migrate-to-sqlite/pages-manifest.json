@@ -1,0 +1,3 @@
+{
+  "/api/auth/migrate-to-sqlite": "pages/api/auth/migrate-to-sqlite.js"
+}

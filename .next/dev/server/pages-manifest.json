@@ -1,0 +1,15 @@
+{
+  "/": "pages/index.js",
+  "/_app": "pages/_app.js",
+  "/_document": "pages/_document.js",
+  "/_error": "pages/_error.js",
+  "/api/auth/diagnostics": "pages/api/auth/diagnostics.js",
+  "/api/auth/login": "pages/api/auth/login.js",
+  "/api/auth/logout": "pages/api/auth/logout.js",
+  "/api/auth/me": "pages/api/auth/me.js",
+  "/api/auth/migrate-to-sqlite": "pages/api/auth/migrate-to-sqlite.js",
+  "/api/auth/register": "pages/api/auth/register.js",
+  "/api/media": "pages/api/media.js",
+  "/api/profile": "pages/api/profile.js",
+  "/api/tests": "pages/api/tests.js"
+}
