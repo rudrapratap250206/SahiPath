@@ -1,12 +1,14 @@
 import crypto from "crypto";
 
-// Fail fast at startup if the secret is not explicitly configured
-const JWT_SECRET = process.env.JWT_SECRET;
-if (!JWT_SECRET) {
-  throw new Error(
-    "JWT_SECRET environment variable is required but was not provided. " +
-    "Add it to your Replit Secrets before starting the server."
-  );
+function getJwtSecret(): string {
+  const secret = process.env.JWT_SECRET;
+  if (!secret) {
+    throw new Error(
+      "JWT_SECRET environment variable is required but was not provided. " +
+      "Add it to your Replit Secrets before starting the server."
+    );
+  }
+  return secret;
 }
 
 // crypto.scrypt has overloads; use the callback form wrapped in a typed promise
@@ -48,7 +50,7 @@ export async function signToken(payload: { id: string; email: string }): Promise
     }),
   );
   const sig = crypto
-    .createHmac("sha256", JWT_SECRET)
+    .createHmac("sha256", getJwtSecret())
     .update(`${header}.${body}`)
     .digest("base64url");
   return `${header}.${body}.${sig}`;
@@ -61,7 +63,7 @@ export async function verifyToken(token: string): Promise<TokenPayload | null> {
     if (parts.length !== 3) return null;
     const [header, body, sig] = parts as [string, string, string];
     const expected = crypto
-      .createHmac("sha256", JWT_SECRET)
+      .createHmac("sha256", getJwtSecret())
       .update(`${header}.${body}`)
       .digest("base64url");
     if (expected !== sig) return null;
