@@ -1,0 +1,34 @@
+{
+  "name": "sahipath",
+  "version": "1.0.0",
+  "description": "",
+  "main": "index.js",
+  "scripts": {
+    "dev": "next dev",
+    "build": "next build",
+    "start": "next start",
+    "lint": "next lint"
+  },
+  "keywords": [],
+  "author": "",
+  "license": "ISC",
+  "dependencies": {
+    "bcryptjs": "^3.0.3",
+    "better-sqlite3": "^12.10.0",
+    "cookie": "^1.1.1",
+    "jsonwebtoken": "^9.0.3",
+    "jspdf": "^4.2.1",
+    "next": "^16.2.6",
+    "pptxgenjs": "^4.0.1",
+    "react": "^19.2.6",
+    "react-dom": "^19.2.6",
+    "xss": "^1.0.15",
+    "zod": "^4.4.3"
+  },
+  "devDependencies": {
+    "@types/node": "^25.8.0",
+    "@types/react": "^19.2.14",
+    "@types/react-dom": "^19.2.3",
+    "typescript": "^6.0.3"
+  }
+}
