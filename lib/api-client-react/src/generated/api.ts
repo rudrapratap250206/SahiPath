@@ -791,7 +791,7 @@ export const getGenerateMediaUrl = () => {
 }
 
 /**
- * @summary Generate AI media (image, podcast, video)
+ * @summary Generate AI media (image or podcast)
  */
 export const generateMedia = async (mediaInput: MediaInput, options?: RequestInit): Promise<MediaResult> => {
 
@@ -840,7 +840,7 @@ const {mutation: mutationOptions, request: requestOptions} = options ?
     export type GenerateMediaMutationError = ErrorType<ErrorResult>
 
     /**
- * @summary Generate AI media (image, podcast, video)
+ * @summary Generate AI media (image or podcast)
  */
 export const useGenerateMedia = <TError = ErrorType<ErrorResult>,
     TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof generateMedia>>, TError,{data: BodyType<MediaInput>}, TContext>, request?: SecondParameter<typeof customFetch>}

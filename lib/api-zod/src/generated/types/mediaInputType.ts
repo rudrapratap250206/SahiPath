@@ -12,6 +12,4 @@ export type MediaInputType = typeof MediaInputType[keyof typeof MediaInputType];
 export const MediaInputType = {
   image: 'image',
   podcast: 'podcast',
-  video: 'video',
-  ppt: 'ppt',
 } as const;

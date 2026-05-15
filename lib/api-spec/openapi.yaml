@@ -228,7 +228,7 @@ paths:
     post:
       operationId: generateMedia
       tags: [media]
-      summary: Generate AI media (image, podcast, video)
+      summary: Generate AI media (image or podcast)
       requestBody:
         required: true
         content:
@@ -451,7 +451,7 @@ components:
       properties:
         type:
           type: string
-          enum: [image, podcast, video, ppt]
+          enum: [image, podcast]
         prompt:
           type: string
           minLength: 1

@@ -296,14 +296,14 @@ export const RecordTestResponse = zod.object({
 
 
 /**
- * @summary Generate AI media (image, podcast, video)
+ * @summary Generate AI media (image or podcast)
  */
 export const generateMediaBodyPromptMax = 5000;
 
 
 
 export const GenerateMediaBody = zod.object({
-  "type": zod.enum(['image', 'podcast', 'video', 'ppt']),
+  "type": zod.enum(['image', 'podcast']),
   "prompt": zod.string().min(1).max(generateMediaBodyPromptMax)
 })
 
