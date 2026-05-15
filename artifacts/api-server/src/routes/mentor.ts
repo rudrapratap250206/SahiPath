@@ -4,28 +4,41 @@ import { logger } from "../lib/logger";
 
 const router = Router();
 
-router.post("/mentor/chat", async (req, res) => {
-  const ip = String(req.headers["x-forwarded-for"] || req.ip || "ip");
-  const rl = rateLimit(`${ip}:mentor-chat`, 20, 60_000);
-  if (rl.limited) return res.status(429).json({ error: "Too many requests" });
+interface GeminiCandidate {
+  content?: { parts?: Array<{ text?: string }> };
+}
+interface GeminiResponse {
+  candidates?: GeminiCandidate[];
+}
 
-  const { message, profile, mode = "text" } = req.body || {};
-  if (!message || typeof message !== "string" || message.trim().length === 0) {
-    return res.status(400).json({ error: "message is required" });
-  }
+router.post("/mentor/chat", async (req, res) => {
+  const ip = String(req.headers["x-forwarded-for"] ?? req.ip ?? "unknown");
+  const { limited } = rateLimit(`${ip}:mentor-chat`, 20, 60_000);
+  if (limited) return res.status(429).json({ error: "Too many requests" });
+
+  const body = req.body as Record<string, unknown>;
+  const message = typeof body.message === "string" ? body.message.trim() : null;
+  const profile = body.profile ?? null;
+  const mode = typeof body.mode === "string" ? body.mode : "text";
+
+  if (!message) return res.status(400).json({ error: "message is required" });
 
   const apiKey = process.env.GEMINI_API_KEY?.trim();
-  if (!apiKey) return res.status(503).json({ error: "GEMINI_API_KEY is not configured" });
+  if (!apiKey) {
+    return res.status(503).json({ error: "GEMINI_API_KEY is not configured" });
+  }
 
   const systemPrompt = [
     "You are SahiPath, a focused career mentor.",
     "Respond with concise, practical guidance.",
     "Do not mention that you are a language model.",
     "If the user asks for step-by-step help, provide actionable steps.",
-    "Keep the reply text-only and do not include markdown code fences unless needed.",
+    "Keep the reply plain text; avoid markdown code fences unless the user specifically asks for code.",
   ].join(" ");
 
-  const profileContext = profile ? JSON.stringify(profile, null, 2) : "No profile provided.";
+  const profileContext = profile
+    ? JSON.stringify(profile, null, 2)
+    : "No profile provided.";
 
   const payload = {
     contents: [
@@ -38,20 +51,13 @@ router.post("/mentor/chat", async (req, res) => {
         ],
       },
     ],
-    generationConfig: {
-      temperature: 0.7,
-      maxOutputTokens: 512,
-    },
+    generationConfig: { temperature: 0.7, maxOutputTokens: 512 },
   };
 
   try {
     const response = await fetch(
       `https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent?key=${encodeURIComponent(apiKey)}`,
-      {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(payload),
-      },
+      { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(payload) },
     );
 
     if (!response.ok) {
@@ -60,22 +66,22 @@ router.post("/mentor/chat", async (req, res) => {
       return res.status(502).json({ error: "Gemini request failed" });
     }
 
-    const data = await response.json();
-    const reply = data?.candidates?.[0]?.content?.parts
-      ?.map((part: any) => part?.text || "")
+    const data = (await response.json()) as GeminiResponse;
+    const reply = data.candidates?.[0]?.content?.parts
+      ?.map(p => p.text ?? "")
       .join("")
       .trim();
 
     if (!reply) {
-      logger.error({}, "Gemini empty reply");
+      logger.error({}, "Gemini returned empty reply");
       return res.status(502).json({ error: "Gemini returned no reply" });
     }
 
-    logger.info({ mode }, "mentor chat reply");
+    logger.info({ mode }, "mentor chat replied");
     return res.json({ reply });
-  } catch (err: any) {
+  } catch (err: unknown) {
     logger.error({ err }, "mentor chat error");
-    return res.status(500).json({ error: "Unable to generate reply" });
+    return res.status(500).json({ error: "Internal error during mentor chat" });
   }
 });
 
