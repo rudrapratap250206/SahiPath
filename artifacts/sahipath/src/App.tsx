@@ -67,22 +67,60 @@ export default function App() {
     setTimeout(() => setToastMsg(null), ms);
   };
 
-  // Study tracker — detect when AI mentions studying a topic and schedule a test notification
+  // Request browser notification permission on first use
+  const requestNotifPermission = async () => {
+    if ('Notification' in window && (window as any).Notification.permission === 'default') {
+      await (window as any).Notification.requestPermission();
+    }
+  };
+
+  // Parse AI reply for the structured STUDY_TOPIC marker
   const detectStudyTopic = (text: string) => {
+    // Prefer the structured marker the AI is instructed to emit
+    const structured = text.match(/🔔\s*STUDY_TOPIC:\s*([^\n]+)/i);
+    if (structured && structured[1]) return structured[1].trim().slice(0, 80);
+    // Fallback patterns
     const patterns = [
-      /you should (?:study|learn|practice|cover|go through) ([A-Za-z0-9 .#+/-]+?)(?:\.|\,|\!|$)/i,
-      /start with ([A-Za-z0-9 .#+/-]+?)(?:\.|\,|\!| which| for| and|$)/i,
-      /focus on ([A-Za-z0-9 .#+/-]+?)(?:\.|\,|\!| which| for| and|$)/i,
-      /complete ([A-Za-z0-9 .#+/-]+?)(?:\.|\,|\!| which| for| and|$)/i,
+      /you should (?:study|learn|practice|cover|go through) ([A-Za-z0-9 .#+/\-]+?)(?:\.|,|!|$)/i,
+      /start with ([A-Za-z0-9 .#+/\-]+?)(?:\.|,|!| which| for| and|$)/i,
+      /focus on ([A-Za-z0-9 .#+/\-]+?)(?:\.|,|!| which| for| and|$)/i,
+      /complete ([A-Za-z0-9 .#+/\-]+?)(?:\.|,|!| which| for| and|$)/i,
     ];
     for (const p of patterns) {
       const m = text.match(p);
-      if (m && m[1]) {
+      if (m?.[1]) {
         const topic = m[1].trim().replace(/['"]/g, '').slice(0, 60);
         if (topic.length >= 3) return topic;
       }
     }
     return null;
+  };
+
+  // Schedule a real browser notification at 8pm (or 12h from now if already past 8pm)
+  const scheduleEndOfDayNotification = (topic: string) => {
+    if (!('Notification' in window)) return;
+    const Notif = (window as any).Notification as typeof Notification;
+    if (Notif.permission !== 'granted') return;
+
+    const now = new Date();
+    const target = new Date();
+    target.setHours(20, 0, 0, 0); // 8:00 PM today
+    if (target <= now) target.setTime(now.getTime() + 12 * 60 * 60 * 1000); // 12h later
+
+    const delay = target.getTime() - now.getTime();
+    const timeLabel = target.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+
+    setTimeout(() => {
+      try {
+        new Notif('SahiPath — Time to test yourself! 📝', {
+          body: `You studied "${topic}" today. Take a quick test now to lock in what you learned.`,
+          icon: '/logo.png',
+          tag: `sp-test-${topic.slice(0, 20)}`,
+        });
+      } catch {}
+    }, delay);
+
+    showToast(`🔔 End-of-day test reminder set for ${timeLabel} — "${topic}"`, 5000);
   };
 
   const scheduleTestNotification = (topic: string) => {
@@ -92,7 +130,8 @@ export default function App() {
       if (!existing.some((n: Notification) => n.topic.toLowerCase() === topic.toLowerCase())) {
         const updated = [...existing, notif];
         localStorage.setItem('sp_upcoming_tests', JSON.stringify(updated));
-        showToast(`📚 Topic detected: "${topic}". A test reminder has been added in the Tests tab!`);
+        scheduleEndOfDayNotification(topic);
+        showToast(`📚 Study topic added: "${topic}". End-of-day test reminder set!`, 5000);
       }
     } catch {}
   };
@@ -228,6 +267,7 @@ export default function App() {
 
   useEffect(() => {
     if (stage !== 'mentor') return;
+    void requestNotifPermission();
     if (twoPersonMode) {
       voiceConvRef.current = true;
       if (!recognitionRef.current && !isListening) void startListening(true);
@@ -244,15 +284,73 @@ export default function App() {
       const data = await mentorMutation.mutateAsync({
         data: { message: userMsg, profile: profile as any, mode: source }
       });
-      const reply = data.reply || 'No reply returned.';
-      setChatMessages(prev => [...prev, { role: 'assistant', text: reply }]);
-      const topic = detectStudyTopic(reply);
+      const rawReply = data.reply || 'No reply returned.';
+      // Strip the STUDY_TOPIC marker from displayed text (it's only for internal use)
+      const displayReply = rawReply.replace(/🔔\s*STUDY_TOPIC:[^\n]*/gi, '').trim();
+      setChatMessages(prev => [...prev, { role: 'assistant', text: displayReply }]);
+      const topic = detectStudyTopic(rawReply);
       if (topic) scheduleTestNotification(topic);
-      if (twoPersonMode && source === 'voice') speakText(reply);
+      if (twoPersonMode && source === 'voice') speakText(displayReply);
     } catch (err: any) {
       const fallback = err?.data?.error || err?.message || 'Unable to reach the mentor. Check your GEMINI_API_KEY.';
       setChatMessages(prev => [...prev, { role: 'assistant', text: fallback }]);
     }
+  };
+
+  // Render a message with clickable course links and URL detection
+  const renderMessageContent = (text: string) => {
+    const lines = text.split('\n');
+    const elements: React.ReactNode[] = [];
+
+    lines.forEach((line, li) => {
+      // Detect structured course line: 📚 COURSE: Title — https://...
+      const courseMatch = line.match(/📚\s*COURSE:\s*(.+?)\s*[—–-]\s*(https?:\/\/\S+)/i);
+      if (courseMatch) {
+        elements.push(
+          <a
+            key={li}
+            href={courseMatch[2]}
+            target="_blank"
+            rel="noopener noreferrer"
+            style={{
+              display: 'flex', alignItems: 'center', gap: '0.5rem',
+              background: 'rgba(0,188,212,0.08)', border: '1px solid rgba(0,188,212,0.3)',
+              borderRadius: 8, padding: '0.5rem 0.75rem', margin: '0.3rem 0',
+              color: 'var(--sp-accent-teal)', textDecoration: 'none', fontSize: '0.85rem',
+              fontWeight: 500,
+            }}
+          >
+            <span>🎓</span>
+            <span style={{ flex: 1 }}>{courseMatch[1].trim()}</span>
+            <span style={{ fontSize: '0.75rem', opacity: 0.7 }}>↗ Open</span>
+          </a>
+        );
+        return;
+      }
+
+      // Detect plain URLs in regular lines and make them clickable
+      const urlRegex = /(https?:\/\/[^\s]+)/g;
+      if (urlRegex.test(line)) {
+        const parts = line.split(/(https?:\/\/[^\s]+)/g);
+        elements.push(
+          <span key={li}>
+            {parts.map((part, pi) =>
+              part.match(/^https?:\/\//) ? (
+                <a key={pi} href={part} target="_blank" rel="noopener noreferrer"
+                  style={{ color: 'var(--sp-accent-teal)', wordBreak: 'break-all' }}>
+                  {part}
+                </a>
+              ) : part
+            )}
+            {li < lines.length - 1 && <br />}
+          </span>
+        );
+      } else {
+        elements.push(<span key={li}>{line}{li < lines.length - 1 && <br />}</span>);
+      }
+    });
+
+    return <>{elements}</>;
   };
 
   const handlePersonalSubmit = (e: React.FormEvent) => {
@@ -621,7 +719,9 @@ export default function App() {
                 {chatMessages.map((msg, i) => (
                   <div key={i} className={`sp-message sp-message-${msg.role}`}>
                     <span className="sp-msg-emoji">{msg.role === 'assistant' ? '🤖' : '👤'}</span>
-                    <div className="sp-message-content">{msg.text}</div>
+                    <div className="sp-message-content">
+                      {msg.role === 'assistant' ? renderMessageContent(msg.text) : msg.text}
+                    </div>
                   </div>
                 ))}
                 {mentorMutation.isPending && (

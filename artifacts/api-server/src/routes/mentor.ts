@@ -9,6 +9,63 @@ interface GeminiCandidate {
 }
 interface GeminiResponse {
   candidates?: GeminiCandidate[];
+  error?: { code?: number; message?: string; status?: string };
+}
+
+// Ordered by free-tier quota availability (most generous first)
+const GEMINI_MODELS = [
+  "gemini-2.0-flash-lite",
+  "gemini-1.5-flash-8b",
+  "gemini-1.5-flash-latest",
+  "gemini-1.5-pro-latest",
+];
+
+async function callGemini(
+  apiKey: string,
+  payload: object,
+): Promise<{ reply: string } | { error: string; status: number }> {
+  for (const model of GEMINI_MODELS) {
+    const url = `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${encodeURIComponent(apiKey)}`;
+    try {
+      const response = await fetch(url, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(payload),
+      });
+
+      if (response.status === 429 || response.status === 503) {
+        logger.warn({ model, status: response.status }, "Gemini model quota/unavailable, trying next");
+        continue;
+      }
+
+      if (!response.ok) {
+        const detail = await response.text();
+        logger.error({ model, status: response.status, detail }, "Gemini upstream error");
+        return { error: "Gemini request failed", status: 502 };
+      }
+
+      const data = (await response.json()) as GeminiResponse;
+      const reply = data.candidates?.[0]?.content?.parts
+        ?.map((p) => p.text ?? "")
+        .join("")
+        .trim();
+
+      if (!reply) {
+        logger.error({ model }, "Gemini returned empty reply");
+        return { error: "Gemini returned no reply", status: 502 };
+      }
+
+      logger.info({ model }, "Gemini replied successfully");
+      return { reply };
+    } catch (err: unknown) {
+      logger.error({ err, model }, "Gemini fetch error");
+    }
+  }
+
+  return {
+    error: "All Gemini models are currently unavailable or quota exhausted. Please try again later.",
+    status: 503,
+  };
 }
 
 router.post("/mentor/chat", async (req, res) => {
@@ -29,11 +86,18 @@ router.post("/mentor/chat", async (req, res) => {
   }
 
   const systemPrompt = [
-    "You are SahiPath, a focused career mentor.",
-    "Respond with concise, practical guidance.",
+    "You are SahiPath, a focused AI career mentor for students and professionals in India.",
+    "Give concise, practical, and actionable guidance.",
     "Do not mention that you are a language model.",
-    "If the user asks for step-by-step help, provide actionable steps.",
-    "Keep the reply plain text; avoid markdown code fences unless the user specifically asks for code.",
+    "IMPORTANT — When you recommend a topic, course, or skill, ALWAYS suggest 1-2 real online resources using this exact format:",
+    '  📚 COURSE: [Course Title] — [full URL]',
+    "  Prefer free resources: YouTube playlists, Coursera free courses, freeCodeCamp, NPTEL, or official docs.",
+    "  Example: 📚 COURSE: CS50 Introduction to Computer Science — https://www.edx.org/cs50",
+    "If the user asks for a roadmap or study plan, include at least 2-3 course links covering the key topics.",
+    "When you mention a topic the user should study today, end your reply with:",
+    '  🔔 STUDY_TOPIC: [exact topic name]',
+    "  This is used to schedule an end-of-day test reminder.",
+    "Keep replies clear and plain text; avoid markdown code fences unless the user asks for code.",
   ].join(" ");
 
   const profileContext = profile
@@ -46,39 +110,21 @@ router.post("/mentor/chat", async (req, res) => {
         role: "user",
         parts: [
           {
-            text: `${systemPrompt}\n\nMode: ${mode}\n\nProfile context:\n${profileContext}\n\nUser message:\n${message}`,
+            text: `${systemPrompt}\n\nMode: ${mode}\n\nUser profile:\n${profileContext}\n\nUser message:\n${message}`,
           },
         ],
       },
     ],
-    generationConfig: { temperature: 0.7, maxOutputTokens: 512 },
+    generationConfig: { temperature: 0.7, maxOutputTokens: 1024 },
   };
 
   try {
-    const response = await fetch(
-      `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent?key=${encodeURIComponent(apiKey)}`,
-      { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(payload) },
-    );
-
-    if (!response.ok) {
-      const detail = await response.text();
-      logger.error({ status: response.status, detail }, "Gemini upstream error");
-      return res.status(502).json({ error: "Gemini request failed" });
+    const result = await callGemini(apiKey, payload);
+    if ("error" in result) {
+      return res.status(result.status).json({ error: result.error });
     }
-
-    const data = (await response.json()) as GeminiResponse;
-    const reply = data.candidates?.[0]?.content?.parts
-      ?.map(p => p.text ?? "")
-      .join("")
-      .trim();
-
-    if (!reply) {
-      logger.error({}, "Gemini returned empty reply");
-      return res.status(502).json({ error: "Gemini returned no reply" });
-    }
-
     logger.info({ mode }, "mentor chat replied");
-    return res.json({ reply });
+    return res.json({ reply: result.reply });
   } catch (err: unknown) {
     logger.error({ err }, "mentor chat error");
     return res.status(500).json({ error: "Internal error during mentor chat" });
