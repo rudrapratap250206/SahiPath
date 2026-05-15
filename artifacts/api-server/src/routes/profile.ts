@@ -2,7 +2,7 @@ import { Router, Request, Response } from "express";
 import { db } from "@workspace/db";
 import { usersTable } from "@workspace/db";
 import { eq } from "drizzle-orm";
-import { verifyToken, parseCookieToken } from "../lib/auth";
+import { verifyToken, parseRequestToken } from "../lib/auth";
 import { rateLimit } from "../lib/rateLimit";
 import { logger } from "../lib/logger";
 
@@ -12,7 +12,7 @@ async function requireAuth(
   req: Request,
   res: Response,
 ): Promise<{ id: string; email: string } | null> {
-  const token = parseCookieToken(req.headers.cookie);
+  const token = parseRequestToken(req.headers as { cookie?: string; authorization?: string });
   if (!token) {
     res.status(401).json({ error: "Not authenticated" });
     return null;
@@ -46,23 +46,20 @@ router.get("/profile", async (req, res) => {
 
 router.post("/profile", async (req, res) => {
   const ip = String(req.headers["x-forwarded-for"] ?? req.ip ?? "unknown");
-  const { limited } = rateLimit(`${ip}:profile`, 10, 60_000);
+  const { limited } = rateLimit(`${ip}:profile`, 20, 60_000);
   if (limited) return res.status(429).json({ error: "Too many requests" });
 
   const user = await requireAuth(req, res);
   if (!user) return;
 
-  const profile = req.body as unknown;
-  if (!profile || typeof profile !== "object" || Array.isArray(profile)) {
-    return res.status(400).json({ error: "Profile must be a JSON object" });
-  }
+  const profile = req.body as Record<string, unknown>;
 
   try {
     await db
       .update(usersTable)
       .set({ profile: JSON.stringify(profile) })
       .where(eq(usersTable.id, user.id));
-    logger.info({ userId: user.id }, "profile updated");
+    logger.info({ userId: user.id }, "Profile saved");
     return res.json({ profile });
   } catch (err: unknown) {
     logger.error({ err }, "save profile error");

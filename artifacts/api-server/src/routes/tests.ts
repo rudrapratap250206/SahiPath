@@ -2,7 +2,7 @@ import { Router } from "express";
 import { db } from "@workspace/db";
 import { testRecordsTable } from "@workspace/db";
 import { desc, eq } from "drizzle-orm";
-import { verifyToken, parseCookieToken } from "../lib/auth";
+import { verifyToken, parseRequestToken } from "../lib/auth";
 import { rateLimit } from "../lib/rateLimit";
 import { logger } from "../lib/logger";
 
@@ -10,7 +10,7 @@ const router = Router();
 
 router.get("/tests", async (req, res) => {
   try {
-    const token = parseCookieToken(req.headers.cookie);
+    const token = parseRequestToken(req.headers as { cookie?: string; authorization?: string });
     let userId: string | null = null;
     if (token) {
       const payload = await verifyToken(token);
@@ -51,7 +51,7 @@ router.post("/tests", async (req, res) => {
   }
 
   try {
-    const token = parseCookieToken(req.headers.cookie);
+    const token = parseRequestToken(req.headers as { cookie?: string; authorization?: string });
     let userId: string | null = null;
     if (token) {
       const payload = await verifyToken(token);

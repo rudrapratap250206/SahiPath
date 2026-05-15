@@ -60,6 +60,8 @@ export interface UserRecord {
 
 export interface AuthResult {
   user: UserRecord;
+  /** JWT token for Bearer auth (mobile clients) */
+  token?: string;
 }
 
 export interface ProfileResult {

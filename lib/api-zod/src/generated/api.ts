@@ -70,7 +70,8 @@ export const RegisterResponse = zod.object({
   "createdAt": zod.string().optional(),
   "updatedAt": zod.string().optional()
 }).optional()
-})
+}),
+  "token": zod.string().optional().describe('JWT token for Bearer auth (mobile clients)')
 })
 
 
@@ -105,7 +106,8 @@ export const LoginResponse = zod.object({
   "createdAt": zod.string().optional(),
   "updatedAt": zod.string().optional()
 }).optional()
-})
+}),
+  "token": zod.string().optional().describe('JWT token for Bearer auth (mobile clients)')
 })
 
 
@@ -143,7 +145,8 @@ export const GetMeResponse = zod.object({
   "createdAt": zod.string().optional(),
   "updatedAt": zod.string().optional()
 }).optional()
-})
+}),
+  "token": zod.string().optional().describe('JWT token for Bearer auth (mobile clients)')
 })
 
 

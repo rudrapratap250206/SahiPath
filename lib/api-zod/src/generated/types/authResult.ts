@@ -9,4 +9,6 @@ import type { UserRecord } from './userRecord';
 
 export interface AuthResult {
   user: UserRecord;
+  /** JWT token for Bearer auth (mobile clients) */
+  token?: string;
 }

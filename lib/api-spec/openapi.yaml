@@ -327,6 +327,9 @@ components:
       properties:
         user:
           $ref: "#/components/schemas/UserRecord"
+        token:
+          type: string
+          description: JWT token for Bearer auth (mobile clients)
 
     UserProfile:
       type: object

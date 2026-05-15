@@ -110,6 +110,18 @@ export function parseCookieToken(cookieHeader: string | undefined): string | nul
   return null;
 }
 
+export function parseRequestToken(headers: {
+  cookie?: string;
+  authorization?: string;
+}): string | null {
+  const authHeader = headers.authorization;
+  if (authHeader && authHeader.startsWith("Bearer ")) {
+    const token = authHeader.slice(7).trim();
+    if (token) return token;
+  }
+  return parseCookieToken(headers.cookie);
+}
+
 export function serializeCookie(
   name: string,
   value: string,

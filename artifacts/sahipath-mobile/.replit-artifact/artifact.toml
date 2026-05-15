@@ -1,0 +1,27 @@
+kind = "mobile"
+previewPath = "/sahipath-mobile/"
+title = "SahiPath Mobile"
+version = "1.0.0"
+id = "artifacts/sahipath-mobile"
+router = "expo-domain"
+
+[[integratedSkills]]
+name = "expo"
+version = "1.0.0"
+
+[[services]]
+ensurePreviewReachable = "/status"
+name = "expo"
+paths = [ "/sahipath-mobile/" ]
+localPort = 25897
+
+[services.development]
+run = "pnpm --filter @workspace/sahipath-mobile run dev"
+
+[services.production]
+build = [ "pnpm", "--filter", "@workspace/sahipath-mobile", "run", "build" ]
+run = [ "pnpm", "--filter", "@workspace/sahipath-mobile", "run", "serve" ]
+
+[services.env]
+PORT = "25897"
+BASE_PATH = "/sahipath-mobile/"

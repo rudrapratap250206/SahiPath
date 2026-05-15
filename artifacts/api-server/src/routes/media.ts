@@ -1,5 +1,5 @@
 import { Router } from "express";
-import { verifyToken, parseCookieToken } from "../lib/auth";
+import { verifyToken, parseRequestToken } from "../lib/auth";
 import { rateLimit } from "../lib/rateLimit";
 import { logger } from "../lib/logger";
 
@@ -12,7 +12,7 @@ router.post("/media", async (req, res) => {
   const { limited } = rateLimit(`${ip}:media`, 10, 60_000);
   if (limited) return res.status(429).json({ error: "Too many requests" });
 
-  const token = parseCookieToken(req.headers.cookie);
+  const token = parseRequestToken(req.headers as { cookie?: string; authorization?: string });
   if (!token) return res.status(401).json({ error: "Not authenticated" });
   const payload = await verifyToken(token);
   if (!payload) return res.status(401).json({ error: "Invalid or expired token" });
