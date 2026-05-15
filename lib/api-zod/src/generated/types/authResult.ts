@@ -5,7 +5,8 @@
  * SahiPath API specification
  * OpenAPI spec version: 0.1.0
  */
+import type { UserRecord } from './userRecord';
 
-export interface HealthStatus {
-  status: string;
+export interface AuthResult {
+  user: UserRecord;
 }

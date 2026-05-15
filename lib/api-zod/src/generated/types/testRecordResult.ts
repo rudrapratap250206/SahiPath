@@ -5,7 +5,8 @@
  * SahiPath API specification
  * OpenAPI spec version: 0.1.0
  */
+import type { TestRecord } from './testRecord';
 
-export interface HealthStatus {
-  status: string;
+export interface TestRecordResult {
+  test: TestRecord;
 }
