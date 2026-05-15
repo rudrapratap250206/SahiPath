@@ -31,9 +31,12 @@ export default function App() {
   const [pendingTestTopic, setPendingTestTopic] = useState<string | null>(null);
   const [toastMsg, setToastMsg] = useState<string | null>(null);
   const [isListening, setIsListening] = useState(false);
+  const [chatInterim, setChatInterim] = useState('');
   const recognitionRef = useRef<any>(null);
   const voiceConvRef = useRef(false);
   const pendingVoiceRef = useRef(false);
+  const listeningActiveRef = useRef(false);
+  const chatFinalsRef = useRef('');
 
   const [personalData, setPersonalData] = useState({
     firstName: '', lastName: '', age: '', email: '', location: '',
@@ -152,7 +155,10 @@ export default function App() {
   const stopListening = () => {
     voiceConvRef.current = false;
     pendingVoiceRef.current = false;
+    listeningActiveRef.current = false;
     setIsListening(false);
+    setChatInterim('');
+    chatFinalsRef.current = '';
     try { recognitionRef.current?.stop?.(); } catch {}
     recognitionRef.current = null;
   };
@@ -161,25 +167,61 @@ export default function App() {
     const w: any = window;
     const SR = w.SpeechRecognition || w.webkitSpeechRecognition;
     if (!SR) { alert('Speech recognition not supported in this browser'); return; }
+
+    chatFinalsRef.current = '';
     const recog = new SR();
     recog.lang = lang;
-    recog.interimResults = false;
-    recog.continuous = false;
     recog.maxAlternatives = 1;
-    recog.onresult = async (e: any) => {
-      const transcript = e.results[e.results.length - 1][0].transcript.trim();
-      if (!transcript) return;
-      if (autoSend && twoPersonMode) {
+
+    if (autoSend && twoPersonMode) {
+      // Two-person mode: auto-sends when user pauses — use non-continuous
+      recog.continuous = false;
+      recog.interimResults = false;
+      recog.onresult = async (e: any) => {
+        const transcript = e.results[e.results.length - 1][0].transcript.trim();
+        if (!transcript) return;
         pendingVoiceRef.current = true;
         recog.stop();
         await sendMentorMessage(transcript, 'voice');
-        return;
-      }
-      setChatInput(prev => (prev ? prev + ' ' + transcript : transcript));
-    };
-    recog.onend = () => { setIsListening(false); recognitionRef.current = null; };
-    recog.onerror = () => { setIsListening(false); recognitionRef.current = null; };
+      };
+      recog.onend = () => { setIsListening(false); recognitionRef.current = null; };
+      recog.onerror = () => { setIsListening(false); recognitionRef.current = null; };
+    } else {
+      // Manual mode: stays on until user taps stop
+      recog.continuous = true;
+      recog.interimResults = true;
+      recog.onresult = (e: any) => {
+        let finals = '';
+        let interim = '';
+        for (let i = 0; i < e.results.length; i++) {
+          if (e.results[i].isFinal) {
+            finals += e.results[i][0].transcript;
+          } else {
+            interim += e.results[i][0].transcript;
+          }
+        }
+        chatFinalsRef.current = finals;
+        setChatInput(finals);
+        setChatInterim(interim);
+      };
+      recog.onerror = (e: any) => {
+        if (e.error === 'no-speech') return;
+        stopListening();
+      };
+      recog.onend = () => {
+        if (listeningActiveRef.current) {
+          // Browser ended early — restart to keep listening
+          try { recog.start(); } catch {}
+        } else {
+          setIsListening(false);
+          setChatInterim('');
+          recognitionRef.current = null;
+        }
+      };
+    }
+
     recognitionRef.current = recog;
+    listeningActiveRef.current = true;
     setIsListening(true);
     recog.start();
   };
@@ -387,8 +429,8 @@ export default function App() {
           )}
 
           <div style={{ textAlign: 'center', marginBottom: '2rem' }}>
-            <h1 style={{ fontSize: '2.5rem', marginBottom: '0.5rem' }}>🚀 SahiPath</h1>
-            <p style={{ fontSize: '1rem', color: 'var(--sp-text-secondary)' }}>Your Personal AI Career Mentor</p>
+            <img src="/logo.png" alt="SahiPath" style={{ height: '90px', objectFit: 'contain', marginBottom: '0.5rem' }} />
+            <p style={{ fontSize: '1rem', color: 'var(--sp-text-secondary)', marginTop: '0.2rem' }}>Your Personal AI Career Mentor</p>
           </div>
 
           <h2 style={{ textAlign: 'center', marginBottom: '1.5rem', fontSize: '1.3rem' }}>🌍 Choose Your Language</h2>
@@ -433,7 +475,10 @@ export default function App() {
       <div className="sp-container sp-form-container">
         {toastMsg && <div className="sp-toast">{toastMsg}</div>}
         <div className="sp-card sp-form-card">
-          <h1>👤 {t['personal_details'] || 'Personal Details'}</h1>
+          <div style={{ display: 'flex', alignItems: 'center', gap: '0.8rem', marginBottom: '0.3rem' }}>
+            <img src="/logo.png" alt="SahiPath" style={{ height: '40px', objectFit: 'contain' }} />
+            <h1 style={{ margin: 0 }}>👤 {t['personal_details'] || 'Personal Details'}</h1>
+          </div>
           <p className="sp-form-subtitle">{t['tell_us_about'] || 'Tell us about yourself'}</p>
           <p style={{ fontSize: '0.82rem', color: 'var(--sp-text-secondary)', marginBottom: '1.2rem' }}>
             🎤 Tap the mic icon next to any field to fill it by speaking
@@ -474,7 +519,10 @@ export default function App() {
       <div className="sp-container sp-form-container">
         {toastMsg && <div className="sp-toast">{toastMsg}</div>}
         <div className="sp-card sp-form-card">
-          <h1>💼 {t['professional_details'] || 'Professional Details'}</h1>
+          <div style={{ display: 'flex', alignItems: 'center', gap: '0.8rem', marginBottom: '0.3rem' }}>
+            <img src="/logo.png" alt="SahiPath" style={{ height: '40px', objectFit: 'contain' }} />
+            <h1 style={{ margin: 0 }}>💼 {t['professional_details'] || 'Professional Details'}</h1>
+          </div>
           <p className="sp-form-subtitle">{t['career_info'] || 'Tell us about your career goals'}</p>
           <p style={{ fontSize: '0.82rem', color: 'var(--sp-text-secondary)', marginBottom: '1.2rem' }}>
             🎤 Tap the mic icon to speak your answers
@@ -512,11 +560,14 @@ export default function App() {
     <div className="sp-container sp-mentor-main">
       {toastMsg && <div className="sp-toast">{toastMsg}</div>}
 
-      <div className="sp-mentor-header">
-        <h1>🤖 {t['mentorChat'] || 'AI Career Mentor'}
-          {profile?.firstName && <span style={{ WebkitTextFillColor: 'var(--sp-text-primary)', background: 'none' }}> — <span style={{ color: 'var(--sp-accent-teal)', WebkitTextFillColor: 'var(--sp-accent-teal)' }}>{profile.firstName}</span></span>}
-        </h1>
-        <p className="sp-mentor-subtitle">{t['rag_intro'] || '24/7 AI Assistant powered by your personal career context'}</p>
+      <div className="sp-mentor-header" style={{ display: 'flex', alignItems: 'center', gap: '1rem', flexWrap: 'wrap' }}>
+        <img src="/logo.png" alt="SahiPath" style={{ height: '52px', objectFit: 'contain', flexShrink: 0 }} />
+        <div>
+          <h1 style={{ margin: 0 }}>{t['mentorChat'] || 'AI Career Mentor'}
+            {profile?.firstName && <span style={{ WebkitTextFillColor: 'var(--sp-text-primary)', background: 'none' }}> — <span style={{ color: 'var(--sp-accent-teal)', WebkitTextFillColor: 'var(--sp-accent-teal)' }}>{profile.firstName}</span></span>}
+          </h1>
+          <p className="sp-mentor-subtitle" style={{ margin: 0 }}>{t['rag_intro'] || '24/7 AI Assistant powered by your personal career context'}</p>
+        </div>
       </div>
 
       <div className="sp-mentor-layout">
@@ -582,10 +633,21 @@ export default function App() {
                 <div ref={chatBottomRef} />
               </div>
               <form onSubmit={handleChatSubmit} className="sp-chat-form">
-                <input type="text" value={chatInput} onChange={e => setChatInput(e.target.value)} placeholder={t['askAnything'] || 'Ask me anything...'} className="sp-chat-input" />
-                <button type="button" title={isListening ? 'Listening... click to stop' : 'Use microphone'}
+                <div style={{ flex: 1, position: 'relative' }}>
+                  <input
+                    type="text"
+                    value={isListening && chatInterim ? chatInput + ' ' + chatInterim : chatInput}
+                    onChange={e => { if (!isListening) setChatInput(e.target.value); }}
+                    placeholder={isListening ? '🎙️ Listening… speak freely, tap 🔴 to stop' : (t['askAnything'] || 'Ask me anything...')}
+                    className="sp-chat-input"
+                    style={{ width: '100%', fontStyle: isListening && chatInterim ? 'italic' : 'normal', opacity: isListening && chatInterim ? 0.85 : 1 }}
+                  />
+                </div>
+                <button
+                  type="button"
+                  title={isListening ? 'Tap to stop recording' : 'Tap to start — mic stays on until you tap again'}
                   onClick={() => isListening ? stopListening() : startListening(twoPersonMode)}
-                  style={{ background: isListening ? 'var(--sp-accent-coral)' : 'var(--sp-bg-tertiary)', border: `1px solid ${isListening ? 'var(--sp-accent-coral)' : 'var(--sp-border-color)'}`, borderRadius: 8, padding: '0.6rem 0.8rem', cursor: 'pointer', color: 'var(--sp-text-primary)', animation: isListening ? 'spPulse 1s infinite' : 'none' }}>
+                  style={{ background: isListening ? 'var(--sp-accent-coral)' : 'var(--sp-bg-tertiary)', border: `1px solid ${isListening ? 'var(--sp-accent-coral)' : 'var(--sp-border-color)'}`, borderRadius: 8, padding: '0.6rem 0.8rem', cursor: 'pointer', color: 'var(--sp-text-primary)', animation: isListening ? 'spPulse 1s infinite' : 'none', flexShrink: 0 }}>
                   {isListening ? '🔴' : '🎤'}
                 </button>
                 <label style={{ display: 'flex', alignItems: 'center', gap: '0.4rem', cursor: 'pointer', whiteSpace: 'nowrap', fontSize: '0.8rem', color: 'var(--sp-text-secondary)' }}>
@@ -595,7 +657,7 @@ export default function App() {
                 <button type="submit" className="sp-btn-primary" disabled={mentorMutation.isPending} style={{ padding: '0.7rem 1.2rem' }}>{t['send'] || 'Send'}</button>
               </form>
               <div style={{ padding: '0.3rem 1rem 0.5rem', fontSize: '0.75rem', color: 'var(--sp-text-secondary)' }}>
-                {isSpeaking ? '🔊 Speaking...' : twoPersonMode ? 'Two-person: AI listens → replies → speaks → repeats' : 'Mic transcribes to input. Two-person mode enables voice conversation.'}
+                {isSpeaking ? '🔊 Speaking...' : isListening ? '🔴 Recording — speak as long as you need, tap the mic button to stop' : twoPersonMode ? 'Two-person: AI listens → replies → speaks → repeats' : 'Tap 🎤 to speak — mic stays active until you tap again'}
               </div>
             </>
           )}

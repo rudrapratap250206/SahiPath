@@ -9,40 +9,76 @@ interface VoiceFillButtonProps {
 export function VoiceFillButton({ onTranscript, lang = 'en-US', fieldName }: VoiceFillButtonProps) {
   const [listening, setListening] = useState(false);
   const recogRef = useRef<any>(null);
+  const listeningRef = useRef(false);
+  const accumulatedRef = useRef('');
 
-  const toggle = () => {
+  const stop = () => {
+    listeningRef.current = false;
+    setListening(false);
+    try { recogRef.current?.stop(); } catch {}
+    recogRef.current = null;
+    accumulatedRef.current = '';
+  };
+
+  const start = () => {
     const w: any = window;
     const SR = w.SpeechRecognition || w.webkitSpeechRecognition;
     if (!SR) { alert('Speech recognition not supported in this browser'); return; }
 
-    if (listening) {
-      recogRef.current?.stop();
-      setListening(false);
-      return;
-    }
-
+    accumulatedRef.current = '';
     const recog = new SR();
     recog.lang = lang;
-    recog.interimResults = false;
+    recog.continuous = true;
+    recog.interimResults = true;
     recog.maxAlternatives = 1;
+
     recog.onresult = (e: any) => {
-      const t = e.results[0][0].transcript.trim();
-      onTranscript(t);
-      setListening(false);
-      recogRef.current = null;
+      let finals = '';
+      let interim = '';
+      for (let i = 0; i < e.results.length; i++) {
+        if (e.results[i].isFinal) {
+          finals += e.results[i][0].transcript;
+        } else {
+          interim += e.results[i][0].transcript;
+        }
+      }
+      accumulatedRef.current = finals;
+      onTranscript((finals + (interim ? ' ' + interim : '')).trim());
     };
-    recog.onerror = () => { setListening(false); recogRef.current = null; };
-    recog.onend = () => { setListening(false); recogRef.current = null; };
+
+    recog.onerror = (e: any) => {
+      if (e.error === 'no-speech') return;
+      stop();
+    };
+
+    recog.onend = () => {
+      if (listeningRef.current) {
+        try { recog.start(); } catch {}
+      } else {
+        setListening(false);
+        recogRef.current = null;
+      }
+    };
+
     recogRef.current = recog;
-    recog.start();
+    listeningRef.current = true;
     setListening(true);
+    recog.start();
+  };
+
+  const toggle = () => {
+    if (listening) {
+      stop();
+    } else {
+      start();
+    }
   };
 
   return (
     <button
       type="button"
       onClick={toggle}
-      title={`Voice fill${fieldName ? ': ' + fieldName : ''}`}
+      title={listening ? `Stop recording${fieldName ? ' ' + fieldName : ''}` : `Speak${fieldName ? ': ' + fieldName : ''} — mic stays on until you tap again`}
       style={{
         background: listening ? 'var(--sp-accent-coral)' : 'var(--sp-bg-tertiary)',
         border: `1px solid ${listening ? 'var(--sp-accent-coral)' : 'var(--sp-border-color)'}`,
@@ -53,9 +89,10 @@ export function VoiceFillButton({ onTranscript, lang = 'en-US', fieldName }: Voi
         color: 'var(--sp-text-primary)',
         animation: listening ? 'spPulse 1s infinite' : 'none',
         flexShrink: 0,
+        position: 'relative',
       }}
     >
-      🎤
+      {listening ? '🔴' : '🎤'}
     </button>
   );
 }
