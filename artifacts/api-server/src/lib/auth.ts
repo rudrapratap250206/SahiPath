@@ -88,8 +88,8 @@ export async function verifyPassword(password: string, hashed: string): Promise<
     const derivedHex = hashed.slice(colonIdx + 1);
     if (!salt || !derivedHex) return false;
     const derived = await scryptAsync(password, salt, 64);
-    const derivedBuf = Buffer.from(derived.toString("hex"));
-    const storedBuf = Buffer.from(derivedHex);
+    const derivedBuf = Buffer.from(derived.toString("hex"), "hex");
+    const storedBuf = Buffer.from(derivedHex, "hex");
     if (derivedBuf.length !== storedBuf.length) return false;
     return crypto.timingSafeEqual(derivedBuf, storedBuf);
   } catch {
