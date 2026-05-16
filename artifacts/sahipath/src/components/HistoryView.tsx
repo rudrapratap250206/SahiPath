@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef, useCallback } from 'react';
 
 interface Session {
   id: string;
@@ -15,29 +15,69 @@ interface Message {
 export function HistoryView() {
   const [sessions, setSessions] = useState<Session[]>([]);
   const [loading, setLoading] = useState(true);
+  const [refreshing, setRefreshing] = useState(false);
   const [expandedId, setExpandedId] = useState<string | null>(null);
   const [messages, setMessages] = useState<Record<string, Message[]>>({});
   const [loadingMsgs, setLoadingMsgs] = useState<string | null>(null);
   const [deletingId, setDeletingId] = useState<string | null>(null);
+  const [lastUpdated, setLastUpdated] = useState<Date | null>(null);
+  const pollRef = useRef<ReturnType<typeof setInterval> | null>(null);
 
-  const fetchSessions = async () => {
-    setLoading(true);
+  const fetchSessions = useCallback(async (silent = false) => {
+    if (!silent) {
+      if (sessions.length === 0) setLoading(true);
+      else setRefreshing(true);
+    }
     try {
       const res = await fetch('/api/mentor/sessions', { credentials: 'include' });
       if (res.ok) {
         const data = await res.json();
-        setSessions(Array.isArray(data.sessions) ? data.sessions : []);
+        const fetched: Session[] = Array.isArray(data.sessions) ? data.sessions : [];
+        setSessions(fetched);
+        setLastUpdated(new Date());
+
+        // Invalidate cached messages for sessions that were updated
+        if (fetched.length > 0) {
+          setMessages(prev => {
+            const updated: Record<string, Message[]> = {};
+            for (const key of Object.keys(prev)) {
+              if (fetched.find(s => s.id === key)) {
+                updated[key] = prev[key];
+              }
+            }
+            return updated;
+          });
+        }
       }
     } catch {}
     setLoading(false);
-  };
+    setRefreshing(false);
+  }, []);
 
-  useEffect(() => { fetchSessions(); }, []);
+  // Fetch on mount
+  useEffect(() => {
+    fetchSessions();
+  }, [fetchSessions]);
+
+  // Auto-poll every 10 seconds while the view is active
+  useEffect(() => {
+    pollRef.current = setInterval(() => {
+      fetchSessions(true);
+    }, 10000);
+    return () => {
+      if (pollRef.current) clearInterval(pollRef.current);
+    };
+  }, [fetchSessions]);
+
+  const handleRefresh = () => {
+    setMessages({});
+    fetchSessions(false);
+  };
 
   const toggleSession = async (sessionId: string) => {
     if (expandedId === sessionId) { setExpandedId(null); return; }
     setExpandedId(sessionId);
-    if (messages[sessionId]) return;
+    // Always refetch messages when expanding to get latest
     setLoadingMsgs(sessionId);
     try {
       const res = await fetch(`/api/mentor/sessions/${sessionId}/messages`, { credentials: 'include' });
@@ -70,6 +110,10 @@ export function HistoryView() {
     } catch { return iso; }
   };
 
+  const formatLastUpdated = (d: Date) => {
+    return d.toLocaleTimeString(undefined, { hour: '2-digit', minute: '2-digit', second: '2-digit' });
+  };
+
   if (loading) return (
     <div style={{ padding: '2rem', textAlign: 'center', color: 'var(--sp-text-secondary)' }}>
       Loading chat history...
@@ -80,10 +124,38 @@ export function HistoryView() {
     <div style={{ padding: '1.5rem', overflowY: 'auto', height: '100%' }}>
       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '1.2rem' }}>
         <h3 style={{ margin: 0 }}>📜 Chat History</h3>
-        <div style={{ fontSize: '0.82rem', color: 'var(--sp-text-secondary)' }}>
-          {sessions.length} conversation{sessions.length !== 1 ? 's' : ''} saved
+        <div style={{ display: 'flex', alignItems: 'center', gap: '0.8rem' }}>
+          {lastUpdated && (
+            <span style={{ fontSize: '0.75rem', color: 'var(--sp-text-secondary)' }}>
+              Updated {formatLastUpdated(lastUpdated)}
+            </span>
+          )}
+          <button
+            onClick={handleRefresh}
+            disabled={refreshing}
+            style={{
+              background: 'transparent',
+              border: '1px solid var(--sp-border-color)',
+              borderRadius: 6,
+              padding: '0.3rem 0.7rem',
+              color: 'var(--sp-text-secondary)',
+              cursor: refreshing ? 'default' : 'pointer',
+              fontSize: '0.8rem',
+              display: 'flex',
+              alignItems: 'center',
+              gap: '0.3rem',
+            }}
+          >
+            <span style={{ display: 'inline-block', animation: refreshing ? 'spin 0.8s linear infinite' : 'none' }}>↻</span>
+            {refreshing ? 'Refreshing...' : 'Refresh'}
+          </button>
+          <div style={{ fontSize: '0.82rem', color: 'var(--sp-text-secondary)' }}>
+            {sessions.length} conversation{sessions.length !== 1 ? 's' : ''}
+          </div>
         </div>
       </div>
+
+      <style>{`@keyframes spin { from { transform: rotate(0deg); } to { transform: rotate(360deg); } }`}</style>
 
       {sessions.length === 0 ? (
         <div style={{ textAlign: 'center', padding: '3rem', background: 'var(--sp-bg-tertiary)', borderRadius: 10, color: 'var(--sp-text-secondary)' }}>
