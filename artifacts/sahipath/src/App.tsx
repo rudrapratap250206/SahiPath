@@ -7,6 +7,8 @@ import { TestsView } from './components/TestsView';
 import { PerformanceView } from './components/PerformanceView';
 import { ResumeView } from './components/ResumeView';
 import { JobsView } from './components/JobsView';
+import { useCopilotReadable, useCopilotAction } from '@copilotkit/react-core';
+import { CopilotPopup } from '@copilotkit/react-ui';
 
 interface Notification {
   id: string;
@@ -56,6 +58,72 @@ export default function App() {
   const logoutMutation = useLogout();
   const saveProfileMutation = useSaveProfile();
   const getMeQuery = useGetMe({ query: { enabled: false } });
+
+  const profile_for_copilot = ragSystem?.getUserProfile() ?? null;
+  useCopilotReadable({
+    description: "The current user's career profile and context in SahiPath",
+    value: profile_for_copilot
+      ? {
+          name: `${profile_for_copilot.firstName} ${profile_for_copilot.lastName}`.trim(),
+          role: profile_for_copilot.currentRole,
+          yearsOfExperience: profile_for_copilot.yearsOfExperience,
+          skills: profile_for_copilot.skills,
+          careerInterests: profile_for_copilot.careerInterests,
+          goals: profile_for_copilot.currentGoals,
+          challenges: profile_for_copilot.challenges,
+          language: profile_for_copilot.language,
+          educationLevel: profile_for_copilot.educationLevel,
+          hoursPerWeek: profile_for_copilot.availableHoursPerWeek,
+          preferredLearningStyle: profile_for_copilot.preferredLearningStyle,
+        }
+      : null,
+  });
+
+  useCopilotReadable({
+    description: "The current active view in the app",
+    value: stage === 'mentor' ? view : stage,
+  });
+
+  useCopilotReadable({
+    description: "Recent chat messages with the AI mentor (last 6)",
+    value: chatMessages.slice(-6).map(m => ({ role: m.role, text: m.text })),
+  });
+
+  useCopilotAction({
+    name: "navigateToView",
+    description: "Navigate to a specific section of the SahiPath app",
+    parameters: [
+      {
+        name: "viewName",
+        type: "string",
+        description: "The section to navigate to: 'chat', 'performance', 'tests', 'resume', or 'jobs'",
+        enum: ["chat", "performance", "tests", "resume", "jobs"],
+      },
+    ],
+    handler: ({ viewName }: { viewName: string }) => {
+      if (stage === 'mentor') {
+        setView(viewName as any);
+      }
+    },
+  });
+
+  useCopilotAction({
+    name: "sendMentorMessage",
+    description: "Send a message to the SahiPath AI career mentor on the user's behalf",
+    parameters: [
+      {
+        name: "message",
+        type: "string",
+        description: "The message to send to the mentor",
+      },
+    ],
+    handler: async ({ message }: { message: string }) => {
+      if (stage === 'mentor' && ragSystem) {
+        setView('chat');
+        await sendMentorMessage(message, 'text');
+      }
+    },
+  });
 
   const t = language && (translations as any)[language] ? (translations as any)[language] : null;
   const lang = language === 'Hindi' ? 'hi-IN' : language === 'Tamil' ? 'ta-IN' : language === 'Telugu' ? 'te-IN' : language === 'Kannada' ? 'kn-IN' : language === 'Malayalam' ? 'ml-IN' : 'en-US';
@@ -815,6 +883,13 @@ export default function App() {
           )}
         </div>
       </div>
+      <CopilotPopup
+        instructions="You are a helpful assistant embedded in SahiPath, an AI career mentoring platform. You have full access to the user's career profile, goals, skills, and recent mentor chat history. You can navigate the app to different sections (chat, tests, performance, resume, jobs) and you can send messages to the AI mentor on behalf of the user. Help the user get the most out of SahiPath — suggest tests, review their progress, recommend next steps, or kick off a mentor conversation for them."
+        labels={{
+          title: "SahiPath Assistant",
+          initial: "Hi! I'm your SahiPath assistant. I can navigate the app, check your progress, or start a conversation with your AI mentor. What would you like to do?",
+        }}
+      />
     </div>
   );
 }
