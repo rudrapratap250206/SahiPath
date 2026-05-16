@@ -39,6 +39,8 @@ externalPort = 3002
 
 [userenv.shared]
 GEMINI_API_KEY = "AIzaSyAZnCOOrBCOgqYJgsHq1DERgd_cxLzlmtc"
+SMTP_APP_PASSWORD = "AIzaSyAUy5KA_N7FPcET_oc-ZvP72f2A7m0ttLw"
+SMTP_EMAIL = "AIzaSyBA4Bd6iBRunnTQlGrbhXjAm6IlxOIIxP8"
 
 [nix]
 channel = "stable-25_05"
