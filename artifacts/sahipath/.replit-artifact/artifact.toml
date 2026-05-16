@@ -1,0 +1,31 @@
+kind = "web"
+previewPath = "/"
+title = "SahiPath - AI Career Mentor"
+version = "1.0.0"
+id = "artifacts/sahipath"
+router = "path"
+
+[[integratedSkills]]
+name = "react-vite"
+version = "1.0.0"
+
+[[services]]
+name = "web"
+paths = [ "/" ]
+localPort = 20977
+
+[services.development]
+run = "pnpm --filter @workspace/sahipath run dev"
+
+[services.production]
+build = [ "pnpm", "--filter", "@workspace/sahipath", "run", "build" ]
+publicDir = "artifacts/sahipath/dist/public"
+serve = "static"
+
+[[services.production.rewrites]]
+from = "/*"
+to = "/index.html"
+
+[services.env]
+PORT = "20977"
+BASE_PATH = "/"
