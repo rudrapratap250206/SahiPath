@@ -1,41 +1,14 @@
 import { Router } from "express";
 import { logger } from "../lib/logger";
 import { parseRequestToken, verifyToken } from "../lib/auth";
+import { ai } from "@workspace/integrations-gemini-ai";
 
 const router = Router();
 
-const GEMINI_MODELS = [
-  "gemini-2.5-flash",
-  "gemini-2.5-flash-lite",
-  "gemini-2.0-flash",
-  "gemini-2.0-flash-lite",
-];
-
-async function callGemini(apiKey: string, prompt: string): Promise<string | null> {
-  const payload = {
-    contents: [{ role: "user", parts: [{ text: prompt }] }],
-    generationConfig: { responseMimeType: "application/json", temperature: 0.7, maxOutputTokens: 4096 },
-  };
-  for (const model of GEMINI_MODELS) {
-    const url = `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${encodeURIComponent(apiKey)}`;
-    try {
-      const res = await fetch(url, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(payload) });
-      if (!res.ok) { logger.warn({ model, status: res.status }, "Gemini studyplan error"); continue; }
-      const data = await res.json() as any;
-      const text = data.candidates?.[0]?.content?.parts?.map((p: any) => p.text ?? "").join("").trim();
-      if (text) { logger.info({ model }, "Gemini studyplan replied"); return text; }
-    } catch (err) { logger.error({ err, model }, "Gemini studyplan fetch error"); }
-  }
-  return null;
-}
-
 router.post("/studyplan/generate", async (req, res) => {
   const token = parseRequestToken(req);
-  const payload = token ? verifyToken(token) : null;
+  const payload = token ? await verifyToken(token) : null;
   if (!payload) return res.status(401).json({ error: "Unauthorized" });
-
-  const apiKey = process.env.GEMINI_API_KEY?.trim();
-  if (!apiKey) return res.status(503).json({ error: "GEMINI_API_KEY not configured" });
 
   const { weakTopics = [], availableHoursPerWeek = 10, goals = "", skills = [], currentRole = "", preferredLearningStyle = "" } = req.body;
 
@@ -85,7 +58,17 @@ Return ONLY valid JSON in this exact format:
 }`;
 
   try {
-    const raw = await callGemini(apiKey, prompt);
+    const response = await ai.models.generateContent({
+      model: "gemini-2.5-flash",
+      contents: [{ role: "user", parts: [{ text: prompt }] }],
+      config: {
+        responseMimeType: "application/json",
+        temperature: 0.7,
+        maxOutputTokens: 8192,
+      },
+    });
+
+    const raw = response.text?.trim();
     if (!raw) return res.status(503).json({ error: "AI generation failed. Please try again." });
 
     let plan: any;
@@ -96,10 +79,11 @@ Return ONLY valid JSON in this exact format:
       return res.status(500).json({ error: "Failed to parse AI response. Please try again." });
     }
 
+    logger.info("Study plan generated successfully");
     return res.json({ plan, generatedAt: new Date().toISOString() });
   } catch (err) {
     logger.error({ err }, "Study plan generation error");
-    return res.status(500).json({ error: "Internal server error" });
+    return res.status(503).json({ error: "AI is temporarily unavailable. Please try again." });
   }
 });
 

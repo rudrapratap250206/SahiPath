@@ -5,101 +5,13 @@ import { eq, desc } from "drizzle-orm";
 import { rateLimit } from "../lib/rateLimit";
 import { logger } from "../lib/logger";
 import { parseRequestToken, verifyToken } from "../lib/auth";
+import { ai } from "@workspace/integrations-gemini-ai";
 
 const router = Router();
-
-interface GeminiCandidate {
-  content?: { parts?: Array<{ text?: string }> };
-}
-interface GeminiResponse {
-  candidates?: GeminiCandidate[];
-  error?: { code?: number; message?: string; status?: string };
-}
 
 interface HistoryMessage {
   role: string;
   text: string;
-}
-
-const GEMINI_MODELS = [
-  "gemini-2.5-flash",
-  "gemini-2.5-flash-lite",
-  "gemini-2.0-flash",
-  "gemini-2.0-flash-lite",
-];
-
-function sleep(ms: number): Promise<void> {
-  return new Promise((resolve) => setTimeout(resolve, ms));
-}
-
-async function callGemini(
-  apiKey: string,
-  payload: object,
-): Promise<{ reply: string } | { error: string; status: number }> {
-  const rateLimited: string[] = [];
-
-  for (const model of GEMINI_MODELS) {
-    const url = `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${encodeURIComponent(apiKey)}`;
-    try {
-      const response = await fetch(url, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(payload),
-      });
-
-      if (response.status === 429 || response.status === 503) {
-        rateLimited.push(model);
-        continue;
-      }
-      if (response.status === 404) {
-        logger.warn({ model }, "Gemini model not found, skipping");
-        continue;
-      }
-      if (!response.ok) {
-        const detail = await response.text();
-        logger.error({ model, status: response.status, detail }, "Gemini upstream error");
-        continue;
-      }
-
-      const data = (await response.json()) as GeminiResponse;
-      const reply = data.candidates?.[0]?.content?.parts
-        ?.map((p) => p.text ?? "")
-        .join("")
-        .trim();
-
-      if (!reply) { logger.error({ model }, "Gemini returned empty reply"); continue; }
-
-      logger.info({ model }, "Gemini replied successfully");
-      return { reply };
-    } catch (err: unknown) {
-      logger.error({ err, model }, "Gemini fetch error");
-    }
-  }
-
-  if (rateLimited.length > 0) {
-    await sleep(3000);
-    for (const model of rateLimited) {
-      const url = `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${encodeURIComponent(apiKey)}`;
-      try {
-        const response = await fetch(url, {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify(payload),
-        });
-        if (!response.ok) continue;
-        const data = (await response.json()) as GeminiResponse;
-        const reply = data.candidates?.[0]?.content?.parts?.map((p) => p.text ?? "").join("").trim();
-        if (reply) { logger.info({ model }, "Gemini replied on retry"); return { reply }; }
-      } catch (err: unknown) {
-        logger.error({ err, model }, "Gemini retry error");
-      }
-    }
-  }
-
-  return {
-    error: "All Gemini models are currently unavailable or quota exhausted. Please try again later.",
-    status: 503,
-  };
 }
 
 const systemPromptText = [
@@ -248,9 +160,6 @@ router.post("/mentor/chat", async (req, res) => {
 
   if (!message) return res.status(400).json({ error: "message is required" });
 
-  const apiKey = process.env.GEMINI_API_KEY?.trim();
-  if (!apiKey) return res.status(503).json({ error: "GEMINI_API_KEY is not configured" });
-
   const profileContext = profile ? JSON.stringify(profile, null, 2) : "No profile provided.";
   const contextPreamble = `Mode: ${mode}\n\nUser profile:\n${profileContext}`;
 
@@ -270,15 +179,24 @@ router.post("/mentor/chat", async (req, res) => {
     contents.push({ role: "user", parts: [{ text: `${contextPreamble}\n\nUser message:\n${message}` }] });
   }
 
-  const payload = {
-    system_instruction: { parts: [{ text: systemPromptText }] },
-    contents,
-    generationConfig: { temperature: 0.7, maxOutputTokens: 8192 },
-  };
-
   try {
-    const result = await callGemini(apiKey, payload);
-    if ("error" in result) return res.status(result.status).json({ error: result.error });
+    const response = await ai.models.generateContent({
+      model: "gemini-2.5-flash",
+      contents,
+      config: {
+        systemInstruction: systemPromptText,
+        temperature: 0.7,
+        maxOutputTokens: 8192,
+      },
+    });
+
+    const reply = response.text?.trim();
+    if (!reply) {
+      logger.error("Gemini returned empty reply");
+      return res.status(503).json({ error: "AI returned an empty response. Please try again." });
+    }
+
+    logger.info({ mode }, "Gemini replied successfully");
 
     const token = parseRequestToken(req.headers as any);
     if (token) {
@@ -295,19 +213,19 @@ router.post("/mentor/chat", async (req, res) => {
 
         await db.insert(chatMessagesTable).values([
           { userId, sessionId: activeSessionId, role: "user", content: message, mode },
-          { userId, sessionId: activeSessionId, role: "assistant", content: result.reply, mode: "text" },
+          { userId, sessionId: activeSessionId, role: "assistant", content: reply, mode: "text" },
         ]).catch((err) => logger.warn({ err }, "Failed to save chat messages"));
 
         logger.info({ mode }, "mentor chat replied");
-        return res.json({ reply: result.reply, sessionId: activeSessionId });
+        return res.json({ reply, sessionId: activeSessionId });
       }
     }
 
     logger.info({ mode }, "mentor chat replied (unauthenticated)");
-    return res.json({ reply: result.reply });
+    return res.json({ reply });
   } catch (err: unknown) {
     logger.error({ err }, "mentor chat error");
-    return res.status(500).json({ error: "Internal error during mentor chat" });
+    return res.status(503).json({ error: "AI is temporarily unavailable. Please try again." });
   }
 });
 
