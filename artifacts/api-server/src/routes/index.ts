@@ -6,6 +6,7 @@ import profileRouter from "./profile";
 import testsRouter from "./tests";
 import mediaRouter from "./media";
 import copilotKitRouter from "./copilotkit";
+import studyPlanRouter from "./studyplan";
 
 const router: IRouter = Router();
 
@@ -15,6 +16,7 @@ router.use(mentorRouter);
 router.use(profileRouter);
 router.use(testsRouter);
 router.use(mediaRouter);
+router.use(studyPlanRouter);
 router.use("/copilotkit", copilotKitRouter);
 router.use("/copilot", copilotKitRouter);
 

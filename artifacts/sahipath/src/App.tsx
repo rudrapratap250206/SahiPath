@@ -8,6 +8,7 @@ import { PerformanceView } from './components/PerformanceView';
 import { ResumeView } from './components/ResumeView';
 import { JobsView } from './components/JobsView';
 import { HistoryView } from './components/HistoryView';
+import { StudyPlanView } from './components/StudyPlanView';
 import { CopilotKit, useCopilotReadable, useCopilotAction } from '@copilotkit/react-core';
 import { CopilotPopup } from '@copilotkit/react-ui';
 import '@copilotkit/react-ui/styles.css';
@@ -113,7 +114,7 @@ export default function App() {
   const [language, setLanguage] = useState<string | null>(null);
   const [isSpeaking, setIsSpeaking] = useState(false);
   const [twoPersonMode, setTwoPersonMode] = useState(false);
-  const [view, setView] = useState<'chat' | 'performance' | 'tests' | 'resume' | 'jobs' | 'history'>('chat');
+  const [view, setView] = useState<'chat' | 'performance' | 'tests' | 'resume' | 'jobs' | 'history' | 'studyplan'>('chat');
   const [newTestAlert, setNewTestAlert] = useState<{ topic: string; score: number } | null>(null);
   const [currentSessionId, setCurrentSessionId] = useState<string | null>(null);
   const [sessions, setSessions] = useState<Array<{ id: string; title: string; createdAt: string }>>([]);
@@ -1000,6 +1001,7 @@ export default function App() {
                 ['history', '📜 History'],
                 ['performance', '📈 Performance'],
                 ['tests', '📝 Tests'],
+                ['studyplan', '📅 Study Plan'],
                 ['resume', '📄 Resume'],
                 ['jobs', '💼 Jobs'],
               ] as const).map(([v, label]) => (
@@ -1098,6 +1100,8 @@ export default function App() {
           {view === 'jobs' && <JobsView profile={profile} />}
 
           {view === 'history' && <HistoryView />}
+
+          {view === 'studyplan' && <StudyPlanView profile={profile} />}
         </div>
       </div>
     </div>
