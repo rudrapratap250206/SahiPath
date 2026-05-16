@@ -120,6 +120,13 @@ export default function App() {
   const [sessions, setSessions] = useState<Array<{ id: string; title: string; createdAt: string }>>([]);
   const [showLogin, setShowLogin] = useState(false);
   const [showRegister, setShowRegister] = useState(false);
+  const [showForgotPassword, setShowForgotPassword] = useState(false);
+  const [forgotStep, setForgotStep] = useState<'email' | 'otp' | 'done'>('email');
+  const [forgotEmail, setForgotEmail] = useState('');
+  const [forgotOTP, setForgotOTP] = useState('');
+  const [forgotNewPassword, setForgotNewPassword] = useState('');
+  const [forgotError, setForgotError] = useState<string | null>(null);
+  const [forgotLoading, setForgotLoading] = useState(false);
   const [authEmail, setAuthEmail] = useState('');
   const [authPassword, setAuthPassword] = useState('');
   const [authError, setAuthError] = useState<string | null>(null);
@@ -702,7 +709,88 @@ export default function App() {
             <button className="sp-btn-primary" style={{ padding: '0.5rem 1rem' }} onClick={() => { setShowRegister(true); setShowLogin(false); }}>Register</button>
           </div>
 
-          {(showLogin || showRegister) && (
+          {showForgotPassword && (
+            <div style={{ marginBottom: '1rem', padding: '1.2rem', borderRadius: 8, background: 'var(--sp-bg-tertiary)', border: '1px solid var(--sp-border-color)' }}>
+              <h3 style={{ marginBottom: '0.8rem', marginTop: 0 }}>🔑 Reset Password</h3>
+              {forgotStep === 'email' && (
+                <div style={{ display: 'flex', flexDirection: 'column', gap: '0.6rem' }}>
+                  <p style={{ margin: 0, fontSize: '0.88rem', color: 'var(--sp-text-secondary)' }}>Enter your registered email and we'll send you a 6-digit reset code.</p>
+                  <input
+                    type="email"
+                    placeholder="your@email.com"
+                    value={forgotEmail}
+                    onChange={e => setForgotEmail(e.target.value)}
+                    style={{ width: '100%', padding: '0.65rem', borderRadius: 6, background: 'var(--sp-bg-secondary)', border: `1px solid ${forgotError ? 'var(--sp-accent-coral)' : 'var(--sp-border-color)'}`, color: 'var(--sp-text-primary)' }}
+                  />
+                  {forgotError && <div style={{ padding: '0.5rem 0.8rem', background: 'rgba(255,107,107,0.1)', border: '1px solid var(--sp-accent-coral)', borderRadius: 6, color: 'var(--sp-accent-coral)', fontSize: '0.85rem' }}>{forgotError}</div>}
+                  <div style={{ display: 'flex', gap: '0.5rem' }}>
+                    <button className="sp-btn-primary" disabled={forgotLoading || !forgotEmail}
+                      onClick={async () => {
+                        setForgotError(null);
+                        if (!forgotEmail.includes('@')) { setForgotError('Please enter a valid email address'); return; }
+                        setForgotLoading(true);
+                        try {
+                          const res = await fetch('/api/auth/forgot-password', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ email: forgotEmail.trim() }) });
+                          if (!res.ok) { const d = await res.json(); setForgotError(d.error || 'Something went wrong'); return; }
+                          setForgotStep('otp');
+                        } catch { setForgotError('Network error. Please try again.'); }
+                        finally { setForgotLoading(false); }
+                      }}>
+                      {forgotLoading ? '⏳ Sending...' : 'Send Reset Code'}
+                    </button>
+                    <button className="sp-btn-secondary" onClick={() => { setShowForgotPassword(false); setForgotStep('email'); setForgotEmail(''); setForgotOTP(''); setForgotNewPassword(''); setForgotError(null); setShowLogin(true); }}>Back to Sign in</button>
+                  </div>
+                </div>
+              )}
+              {forgotStep === 'otp' && (
+                <div style={{ display: 'flex', flexDirection: 'column', gap: '0.6rem' }}>
+                  <p style={{ margin: 0, fontSize: '0.88rem', color: 'var(--sp-text-secondary)' }}>A 6-digit code was sent to <strong>{forgotEmail}</strong>. Enter it below along with your new password.</p>
+                  <input
+                    type="text"
+                    placeholder="6-digit code"
+                    value={forgotOTP}
+                    onChange={e => setForgotOTP(e.target.value.replace(/\D/g, '').slice(0, 6))}
+                    style={{ width: '100%', padding: '0.65rem', borderRadius: 6, background: 'var(--sp-bg-secondary)', border: `1px solid ${forgotError ? 'var(--sp-accent-coral)' : 'var(--sp-border-color)'}`, color: 'var(--sp-text-primary)', letterSpacing: '0.25rem', fontSize: '1.2rem' }}
+                  />
+                  <input
+                    type="password"
+                    placeholder="New password (min. 6 characters)"
+                    value={forgotNewPassword}
+                    onChange={e => setForgotNewPassword(e.target.value)}
+                    style={{ width: '100%', padding: '0.65rem', borderRadius: 6, background: 'var(--sp-bg-secondary)', border: `1px solid ${forgotError ? 'var(--sp-accent-coral)' : 'var(--sp-border-color)'}`, color: 'var(--sp-text-primary)' }}
+                  />
+                  {forgotError && <div style={{ padding: '0.5rem 0.8rem', background: 'rgba(255,107,107,0.1)', border: '1px solid var(--sp-accent-coral)', borderRadius: 6, color: 'var(--sp-accent-coral)', fontSize: '0.85rem' }}>{forgotError}</div>}
+                  <div style={{ display: 'flex', gap: '0.5rem' }}>
+                    <button className="sp-btn-primary" disabled={forgotLoading || forgotOTP.length < 6 || !forgotNewPassword}
+                      onClick={async () => {
+                        setForgotError(null);
+                        if (forgotNewPassword.length < 6) { setForgotError('Password must be at least 6 characters'); return; }
+                        setForgotLoading(true);
+                        try {
+                          const res = await fetch('/api/auth/reset-password', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ email: forgotEmail.trim(), otp: forgotOTP, newPassword: forgotNewPassword }) });
+                          const d = await res.json();
+                          if (!res.ok) { setForgotError(d.error || 'Invalid or expired code'); return; }
+                          setForgotStep('done');
+                        } catch { setForgotError('Network error. Please try again.'); }
+                        finally { setForgotLoading(false); }
+                      }}>
+                      {forgotLoading ? '⏳ Resetting...' : 'Reset Password'}
+                    </button>
+                    <button className="sp-btn-secondary" onClick={() => { setForgotStep('email'); setForgotOTP(''); setForgotNewPassword(''); setForgotError(null); }}>Back</button>
+                  </div>
+                </div>
+              )}
+              {forgotStep === 'done' && (
+                <div style={{ display: 'flex', flexDirection: 'column', gap: '0.8rem', alignItems: 'center', textAlign: 'center', padding: '0.5rem 0' }}>
+                  <div style={{ fontSize: '2rem' }}>✅</div>
+                  <p style={{ margin: 0, color: 'var(--sp-text-primary)' }}>Password reset successfully!</p>
+                  <button className="sp-btn-primary" onClick={() => { setShowForgotPassword(false); setForgotStep('email'); setForgotEmail(''); setForgotOTP(''); setForgotNewPassword(''); setForgotError(null); setShowLogin(true); setAuthEmail(forgotEmail); setAuthPassword(''); }}>Sign in with new password</button>
+                </div>
+              )}
+            </div>
+          )}
+
+          {!showForgotPassword && (showLogin || showRegister) && (
             <div style={{ marginBottom: '1rem', padding: '1.2rem', borderRadius: 8, background: 'var(--sp-bg-tertiary)', border: '1px solid var(--sp-border-color)' }}>
               <h3 style={{ marginBottom: '0.8rem', marginTop: 0 }}>{showLogin ? '🔐 Sign in to SahiPath' : '📝 Create Account'}</h3>
               <div style={{ display: 'flex', flexDirection: 'column', gap: '0.6rem' }}>
@@ -732,7 +820,7 @@ export default function App() {
                     {authError === 'Invalid credentials' ? '❌ Wrong email or password. Check and try again, or register.' : authError}
                   </div>
                 )}
-                <div style={{ display: 'flex', gap: '0.5rem', marginTop: '0.2rem' }}>
+                <div style={{ display: 'flex', gap: '0.5rem', marginTop: '0.2rem', flexWrap: 'wrap' }}>
                   {showLogin ? (
                     <button className="sp-btn-primary" disabled={loginMutation.isPending || !authEmail || !authPassword}
                       onClick={async () => {
@@ -790,6 +878,14 @@ export default function App() {
                   {showLogin && <button className="sp-btn-secondary" style={{ marginLeft: 'auto', fontSize: '0.8rem' }} onClick={() => { setShowLogin(false); setShowRegister(true); setAuthError(null); }}>No account? Register</button>}
                   {showRegister && <button className="sp-btn-secondary" style={{ marginLeft: 'auto', fontSize: '0.8rem' }} onClick={() => { setShowRegister(false); setShowLogin(true); setAuthError(null); }}>Already registered? Sign in</button>}
                 </div>
+                {showLogin && (
+                  <div style={{ textAlign: 'center', marginTop: '0.2rem' }}>
+                    <button style={{ background: 'none', border: 'none', color: 'var(--sp-accent-teal)', cursor: 'pointer', fontSize: '0.82rem', textDecoration: 'underline', padding: 0 }}
+                      onClick={() => { setShowLogin(false); setShowRegister(false); setAuthError(null); setForgotEmail(authEmail); setShowForgotPassword(true); setForgotStep('email'); setForgotError(null); }}>
+                      Forgot password?
+                    </button>
+                  </div>
+                )}
               </div>
             </div>
           )}
