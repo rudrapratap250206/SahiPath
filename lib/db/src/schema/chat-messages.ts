@@ -3,6 +3,7 @@ import { pgTable, text, timestamp } from "drizzle-orm/pg-core";
 export const chatMessagesTable = pgTable("chat_messages", {
   id: text("id").primaryKey().$defaultFn(() => crypto.randomUUID()),
   userId: text("user_id").notNull(),
+  sessionId: text("session_id"),
   role: text("role").notNull(),
   content: text("content").notNull(),
   mode: text("mode").default("text"),

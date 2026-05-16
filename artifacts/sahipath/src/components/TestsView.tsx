@@ -15,14 +15,11 @@ interface TestsViewProps {
 export function TestsView({ pendingTopic, onTopicHandled }: TestsViewProps) {
   const { data: testsData, refetch } = useGetTests();
   const recordMutation = useRecordTest();
-  const [form, setForm] = useState({ name: pendingTopic || '', score: '', notes: '' });
   const [upcoming, setUpcoming] = useState<Notification[]>([]);
+  const [activeTest, setActiveTest] = useState<{ topic: string; notifId?: string } | null>(null);
+  const [scoreInput, setScoreInput] = useState('');
   const [submitError, setSubmitError] = useState<string | null>(null);
-  const [submitSuccess, setSubmitSuccess] = useState(false);
-
-  useEffect(() => {
-    if (pendingTopic) setForm(f => ({ ...f, name: pendingTopic }));
-  }, [pendingTopic]);
+  const [submitSuccess, setSubmitSuccess] = useState<string | null>(null);
 
   useEffect(() => {
     try {
@@ -31,67 +28,146 @@ export function TestsView({ pendingTopic, onTopicHandled }: TestsViewProps) {
     } catch {}
   }, []);
 
+  useEffect(() => {
+    if (pendingTopic) {
+      setActiveTest({ topic: pendingTopic });
+      setScoreInput('');
+      setSubmitError(null);
+    }
+  }, [pendingTopic]);
+
   const dismissNotification = (id: string) => {
     const next = upcoming.filter(u => u.id !== id);
     setUpcoming(next);
     localStorage.setItem('sp_upcoming_tests', JSON.stringify(next));
-    if (id === pendingTopic && onTopicHandled) onTopicHandled();
   };
 
-  const handleSubmit = async (e: React.FormEvent) => {
-    e.preventDefault();
+  const handleTakeTest = (topic: string, notifId?: string) => {
+    setActiveTest({ topic, notifId });
+    setScoreInput('');
     setSubmitError(null);
-    const score = parseFloat(form.score);
-    if (!form.name.trim()) { setSubmitError('Test name is required'); return; }
-    if (isNaN(score) || score < 0 || score > 100) { setSubmitError('Score must be between 0 and 100'); return; }
+    setSubmitSuccess(null);
+  };
+
+  const handleSubmitScore = async () => {
+    if (!activeTest) return;
+    setSubmitError(null);
+    const score = parseFloat(scoreInput);
+    if (isNaN(score) || score < 0 || score > 100) {
+      setSubmitError('Please enter a score between 0 and 100');
+      return;
+    }
 
     try {
-      await recordMutation.mutateAsync({ data: { name: form.name.trim(), score, notes: form.notes.trim() } });
-      setForm({ name: '', score: '', notes: '' });
-      setSubmitSuccess(true);
-      setTimeout(() => setSubmitSuccess(false), 3000);
+      await recordMutation.mutateAsync({
+        data: {
+          name: activeTest.topic,
+          score,
+          date: new Date().toISOString(),
+        }
+      });
+
+      if (activeTest.notifId) dismissNotification(activeTest.notifId);
+      if (onTopicHandled) onTopicHandled();
+      setSubmitSuccess(`✅ Score recorded: ${score}/100 for "${activeTest.topic}"`);
+      setActiveTest(null);
+      setScoreInput('');
       refetch();
-      if (pendingTopic && form.name === pendingTopic && onTopicHandled) onTopicHandled();
     } catch (err: any) {
-      setSubmitError(err?.data?.error || 'Failed to record test');
+      setSubmitError(err?.data?.error || 'Failed to record score. Please try again.');
     }
   };
 
   const tests = (testsData as any)?.tests || [];
-  const average = tests.length > 0 ? Math.round(tests.reduce((acc: number, t: any) => acc + t.score, 0) / tests.length) : null;
+  const average = tests.length > 0
+    ? Math.round(tests.reduce((acc: number, t: any) => acc + t.score, 0) / tests.length)
+    : null;
 
   return (
     <div style={{ padding: '1.5rem', overflowY: 'auto', height: '100%' }}>
+
+      {submitSuccess && (
+        <div style={{ marginBottom: '1rem', padding: '0.8rem 1rem', background: 'rgba(0,212,212,0.1)', border: '1px solid var(--sp-accent-teal)', borderRadius: 8, color: 'var(--sp-accent-teal)', fontSize: '0.9rem' }}>
+          {submitSuccess}
+        </div>
+      )}
+
+      {activeTest && (
+        <div style={{ marginBottom: '1.5rem', padding: '1.2rem', background: 'var(--sp-bg-tertiary)', borderRadius: 10, border: '1px solid var(--sp-accent-teal)' }}>
+          <h3 style={{ marginTop: 0, marginBottom: '0.3rem' }}>📝 Record Test Result</h3>
+          <div style={{ marginBottom: '1rem', padding: '0.5rem 0.8rem', background: 'rgba(0,212,212,0.08)', borderRadius: 6, fontSize: '0.9rem', color: 'var(--sp-accent-teal)' }}>
+            Topic: <strong>{activeTest.topic}</strong>
+          </div>
+          <div style={{ display: 'flex', gap: '0.8rem', alignItems: 'flex-end', flexWrap: 'wrap' }}>
+            <div style={{ flex: 1, minWidth: '120px' }}>
+              <label style={{ display: 'block', fontSize: '0.82rem', color: 'var(--sp-text-secondary)', marginBottom: '0.4rem' }}>Your Score (0–100)</label>
+              <input
+                type="number"
+                placeholder="e.g. 85"
+                value={scoreInput}
+                min={0}
+                max={100}
+                autoFocus
+                onChange={e => setScoreInput(e.target.value)}
+                onKeyDown={e => { if (e.key === 'Enter') handleSubmitScore(); }}
+                style={{ width: '100%', background: 'var(--sp-bg-secondary)', border: `1px solid ${submitError ? 'var(--sp-accent-coral)' : 'var(--sp-border-color)'}`, borderRadius: 6, padding: '0.65rem', color: 'var(--sp-text-primary)', fontSize: '1rem' }}
+              />
+            </div>
+            <div style={{ display: 'flex', gap: '0.5rem' }}>
+              <button
+                className="sp-btn-primary"
+                disabled={recordMutation.isPending}
+                onClick={handleSubmitScore}
+                style={{ padding: '0.65rem 1.2rem' }}
+              >
+                {recordMutation.isPending ? '⏳ Saving...' : '✅ Submit Score'}
+              </button>
+              <button
+                className="sp-btn-secondary"
+                onClick={() => { setActiveTest(null); setSubmitError(null); }}
+                style={{ padding: '0.65rem 1rem' }}
+              >
+                Cancel
+              </button>
+            </div>
+          </div>
+          {submitError && <div style={{ marginTop: '0.5rem', color: 'var(--sp-accent-coral)', fontSize: '0.85rem' }}>{submitError}</div>}
+        </div>
+      )}
+
       {upcoming.length > 0 && (
         <div style={{ marginBottom: '1.5rem' }}>
           <h3 style={{ color: 'var(--sp-accent-orange)', marginBottom: '0.8rem' }}>
-            🔔 Upcoming Tests ({upcoming.length})
+            🔔 Pending Tests ({upcoming.length})
           </h3>
           {upcoming.map(n => (
             <div key={n.id} style={{
-              background: 'rgba(255, 140, 66, 0.1)',
+              background: 'rgba(255, 140, 66, 0.08)',
               border: '1px solid var(--sp-accent-orange)',
-              borderRadius: 8,
-              padding: '0.8rem 1rem',
-              marginBottom: '0.5rem',
-              display: 'flex',
-              justifyContent: 'space-between',
-              alignItems: 'center',
+              borderRadius: 8, padding: '0.8rem 1rem', marginBottom: '0.5rem',
+              display: 'flex', justifyContent: 'space-between', alignItems: 'center',
             }}>
               <div>
-                <strong>Test due:</strong> {n.topic}
+                <div style={{ fontWeight: 600 }}>{n.topic}</div>
                 <div style={{ fontSize: '0.8rem', color: 'var(--sp-text-secondary)', marginTop: '0.2rem' }}>
-                  Scheduled {new Date(n.scheduledAt).toLocaleString()}
+                  Added {new Date(n.scheduledAt).toLocaleString()}
                 </div>
               </div>
               <div style={{ display: 'flex', gap: '0.5rem' }}>
-                <button className="sp-btn-primary" style={{ padding: '0.4rem 0.8rem', fontSize: '0.8rem' }}
-                  onClick={() => {
-                    setForm(f => ({ ...f, name: n.topic }));
-                    dismissNotification(n.id);
-                  }}>Take Test</button>
-                <button className="sp-btn-secondary" style={{ padding: '0.4rem 0.8rem', fontSize: '0.8rem' }}
-                  onClick={() => dismissNotification(n.id)}>Dismiss</button>
+                <button
+                  className="sp-btn-primary"
+                  style={{ padding: '0.4rem 0.8rem', fontSize: '0.8rem' }}
+                  onClick={() => handleTakeTest(n.topic, n.id)}
+                >
+                  📝 Take Test
+                </button>
+                <button
+                  className="sp-btn-secondary"
+                  style={{ padding: '0.4rem 0.8rem', fontSize: '0.8rem' }}
+                  onClick={() => dismissNotification(n.id)}
+                >
+                  Dismiss
+                </button>
               </div>
             </div>
           ))}
@@ -111,62 +187,20 @@ export function TestsView({ pendingTopic, onTopicHandled }: TestsViewProps) {
         </div>
       </div>
 
-      <div style={{ background: 'var(--sp-bg-tertiary)', borderRadius: 8, padding: '1.2rem', marginBottom: '1.5rem' }}>
-        <h3 style={{ marginBottom: '1rem', marginTop: 0 }}>+ Record a Test</h3>
-        {pendingTopic && (
-          <div style={{ padding: '0.5rem', background: 'rgba(0,212,212,0.1)', borderRadius: 6, marginBottom: '0.8rem', fontSize: '0.85rem', color: 'var(--sp-accent-teal)' }}>
-            📚 You studied <strong>{pendingTopic}</strong> — take a test to track progress!
-          </div>
-        )}
-        <form onSubmit={handleSubmit} style={{ display: 'flex', flexDirection: 'column', gap: '0.7rem' }}>
-          <input
-            type="text"
-            placeholder="Topic / Test Name (e.g. React Hooks)"
-            value={form.name}
-            onChange={e => setForm(f => ({ ...f, name: e.target.value }))}
-            style={{ background: 'var(--sp-bg-secondary)', border: '1px solid var(--sp-border-color)', borderRadius: 6, padding: '0.6rem', color: 'var(--sp-text-primary)' }}
-            required
-          />
-          <input
-            type="number"
-            placeholder="Score (0–100)"
-            value={form.score}
-            min={0}
-            max={100}
-            onChange={e => setForm(f => ({ ...f, score: e.target.value }))}
-            style={{ background: 'var(--sp-bg-secondary)', border: '1px solid var(--sp-border-color)', borderRadius: 6, padding: '0.6rem', color: 'var(--sp-text-primary)' }}
-            required
-          />
-          <input
-            type="text"
-            placeholder="Notes (optional)"
-            value={form.notes}
-            onChange={e => setForm(f => ({ ...f, notes: e.target.value }))}
-            style={{ background: 'var(--sp-bg-secondary)', border: '1px solid var(--sp-border-color)', borderRadius: 6, padding: '0.6rem', color: 'var(--sp-text-primary)' }}
-          />
-          {submitError && <div style={{ color: 'var(--sp-accent-coral)', fontSize: '0.85rem' }}>{submitError}</div>}
-          {submitSuccess && <div style={{ color: 'var(--sp-accent-teal)', fontSize: '0.85rem' }}>✓ Test recorded successfully!</div>}
-          <button type="submit" className="sp-btn-primary" disabled={recordMutation.isPending} style={{ padding: '0.7rem' }}>
-            {recordMutation.isPending ? 'Recording...' : 'Record Test'}
-          </button>
-        </form>
+      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '0.8rem' }}>
+        <h3 style={{ margin: 0 }}>Test History</h3>
       </div>
 
-      <h3 style={{ marginBottom: '0.8rem' }}>Test History</h3>
       {tests.length === 0 ? (
         <div style={{ color: 'var(--sp-text-secondary)', textAlign: 'center', padding: '2rem', background: 'var(--sp-bg-tertiary)', borderRadius: 8 }}>
-          No tests recorded yet. Start studying and track your progress!
+          No tests recorded yet. Your mentor will suggest topics to test — click "📝 Take Test" when prompted!
         </div>
       ) : (
         <div style={{ display: 'flex', flexDirection: 'column', gap: '0.5rem' }}>
           {tests.map((t: any) => (
             <div key={t.id} style={{
-              background: 'var(--sp-bg-tertiary)',
-              borderRadius: 8,
-              padding: '0.8rem 1rem',
-              display: 'flex',
-              justifyContent: 'space-between',
-              alignItems: 'center',
+              background: 'var(--sp-bg-tertiary)', borderRadius: 8, padding: '0.8rem 1rem',
+              display: 'flex', justifyContent: 'space-between', alignItems: 'center',
               borderLeft: `3px solid ${t.score >= 70 ? 'var(--sp-accent-teal)' : t.score >= 50 ? 'var(--sp-accent-orange)' : 'var(--sp-accent-coral)'}`,
             }}>
               <div>
@@ -176,12 +210,10 @@ export function TestsView({ pendingTopic, onTopicHandled }: TestsViewProps) {
                   {t.notes ? ` · ${t.notes}` : ''}
                 </div>
               </div>
-              <div style={{
-                fontWeight: 700,
-                fontSize: '1.2rem',
-                color: t.score >= 70 ? 'var(--sp-accent-teal)' : t.score >= 50 ? 'var(--sp-accent-orange)' : 'var(--sp-accent-coral)',
-              }}>
-                {t.score}%
+              <div style={{ display: 'flex', alignItems: 'center', gap: '0.8rem' }}>
+                <div style={{ fontWeight: 700, fontSize: '1.2rem', color: t.score >= 70 ? 'var(--sp-accent-teal)' : t.score >= 50 ? 'var(--sp-accent-orange)' : 'var(--sp-accent-coral)' }}>
+                  {t.score}%
+                </div>
               </div>
             </div>
           ))}

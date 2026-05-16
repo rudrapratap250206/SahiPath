@@ -18,7 +18,7 @@ interface CopilotLayerProps {
   view: string;
   stage: string;
   copilotUserKey: string | null;
-  setView: (v: 'chat' | 'performance' | 'tests' | 'resume' | 'jobs' | 'media') => void;
+  setView: (v: 'chat' | 'performance' | 'tests' | 'resume' | 'jobs') => void;
   onSendMentorMessage: (msg: string, source: 'text' | 'voice') => Promise<void>;
 }
 
@@ -112,7 +112,9 @@ export default function App() {
   const [language, setLanguage] = useState<string | null>(null);
   const [isSpeaking, setIsSpeaking] = useState(false);
   const [twoPersonMode, setTwoPersonMode] = useState(false);
-  const [view, setView] = useState<'chat' | 'performance' | 'tests' | 'resume' | 'jobs' | 'media'>('chat');
+  const [view, setView] = useState<'chat' | 'performance' | 'tests' | 'resume' | 'jobs'>('chat');
+  const [currentSessionId, setCurrentSessionId] = useState<string | null>(null);
+  const [sessions, setSessions] = useState<Array<{ id: string; title: string; createdAt: string }>>([]);
   const [showLogin, setShowLogin] = useState(false);
   const [showRegister, setShowRegister] = useState(false);
   const [authEmail, setAuthEmail] = useState('');
@@ -233,10 +235,34 @@ export default function App() {
     } catch {}
   };
 
+  const loadSessions = async () => {
+    try {
+      const res = await fetch('/api/mentor/sessions', { credentials: 'include' });
+      if (res.ok) {
+        const data = await res.json();
+        if (Array.isArray(data.sessions)) setSessions(data.sessions);
+      }
+    } catch {}
+  };
+
+  const loadSessionMessages = async (sessionId: string) => {
+    try {
+      const res = await fetch(`/api/mentor/sessions/${sessionId}/messages`, { credentials: 'include' });
+      if (res.ok) {
+        const data = await res.json();
+        if (Array.isArray(data.messages) && data.messages.length > 0) {
+          setChatMessages(data.messages.map((m: any) => ({ role: m.role, text: m.text })));
+          return true;
+        }
+      }
+    } catch {}
+    return false;
+  };
+
   // Load server-side conversation history for logged-in users
   const loadChatHistory = async () => {
     try {
-      const res = await fetch('/api/mentor/history');
+      const res = await fetch('/api/mentor/history', { credentials: 'include' });
       if (res.ok) {
         const data = await res.json();
         if (Array.isArray(data.messages) && data.messages.length > 0) {
@@ -266,11 +292,19 @@ export default function App() {
             setStage('mentor');
             const uKey = data?.user?.email || profile.email || null;
             if (uKey) { setCopilotUserKey(uKey); localStorage.setItem('sp_copilot_user', uKey); }
-            // Load persisted history, fall back to welcome message
-            const hasHistory = await loadChatHistory();
-            if (!hasHistory) {
-              setChatMessages([{ role: 'assistant', text: `Welcome back, ${profile.firstName}! How can I help you today?` }]);
+            // Load sessions list then most recent session messages
+            await loadSessions();
+            const sessionsRes = await fetch('/api/mentor/sessions', { credentials: 'include' });
+            if (sessionsRes.ok) {
+              const sessData = await sessionsRes.json();
+              if (Array.isArray(sessData.sessions) && sessData.sessions.length > 0) {
+                const latest = sessData.sessions[0];
+                setCurrentSessionId(latest.id);
+                const loaded = await loadSessionMessages(latest.id);
+                if (loaded) return;
+              }
             }
+            setChatMessages([{ role: 'assistant', text: `Welcome back, ${profile.firstName}! How can I help you today?` }]);
             return;
           }
         }
@@ -400,12 +434,59 @@ export default function App() {
     const profile = ragSystem.getUserProfile();
     try {
       const data = await mentorMutation.mutateAsync({
-        data: { message: userMsg, profile: profile as any, mode: source, history: chatMessages.slice(-20) } as any
+        data: { message: userMsg, profile: profile as any, mode: source, history: chatMessages.slice(-20), sessionId: currentSessionId } as any
       });
-      const rawReply = data.reply || 'No reply returned.';
-      // Strip the STUDY_TOPIC marker from displayed text (it's only for internal use)
+      const rawReply = (data as any).reply || 'No reply returned.';
+
+      // Handle AI image generation request
+      const imageMatch = rawReply.match(/🖼️\s*GENERATE_IMAGE:\s*([^\n]+)/i);
+      if (imageMatch) {
+        setChatMessages(prev => [...prev, { role: 'assistant', text: '🖼️ Generating image for you, please wait...' }]);
+        try {
+          const r = await fetch('/api/media', { method: 'POST', headers: { 'Content-Type': 'application/json' }, credentials: 'include', body: JSON.stringify({ type: 'image', prompt: imageMatch[1].trim() }) });
+          const d = await r.json();
+          if (r.ok && d.url) {
+            setChatMessages(prev => [...prev.slice(0, -1), { role: 'assistant', text: `🖼️ Here's your generated image:\n[IMAGE:${d.url}]` }]);
+          } else {
+            setChatMessages(prev => [...prev.slice(0, -1), { role: 'assistant', text: `❌ Image generation failed: ${d.error || 'Unknown error'}. OPENAI_API_KEY must be configured.` }]);
+          }
+        } catch {
+          setChatMessages(prev => [...prev.slice(0, -1), { role: 'assistant', text: '❌ Image generation failed. Make sure OPENAI_API_KEY is set in secrets.' }]);
+        }
+        if ((data as any).sessionId) { setCurrentSessionId((data as any).sessionId); loadSessions(); }
+        return;
+      }
+
+      // Handle AI podcast generation request
+      const podcastMatch = rawReply.match(/🎙️\s*GENERATE_PODCAST:\s*([\s\S]+)/i);
+      if (podcastMatch) {
+        setChatMessages(prev => [...prev, { role: 'assistant', text: '🎙️ Generating audio podcast for you, please wait...' }]);
+        try {
+          const r = await fetch('/api/media', { method: 'POST', headers: { 'Content-Type': 'application/json' }, credentials: 'include', body: JSON.stringify({ type: 'podcast', prompt: podcastMatch[1].trim() }) });
+          const d = await r.json();
+          if (r.ok && d.url) {
+            setChatMessages(prev => [...prev.slice(0, -1), { role: 'assistant', text: `🎙️ Your podcast is ready! Press play to listen:\n[AUDIO:${d.url}]` }]);
+          } else {
+            setChatMessages(prev => [...prev.slice(0, -1), { role: 'assistant', text: `❌ Podcast generation failed: ${d.error || 'Unknown error'}. OPENAI_API_KEY must be configured.` }]);
+          }
+        } catch {
+          setChatMessages(prev => [...prev.slice(0, -1), { role: 'assistant', text: '❌ Podcast generation failed. Make sure OPENAI_API_KEY is set in secrets.' }]);
+        }
+        if ((data as any).sessionId) { setCurrentSessionId((data as any).sessionId); loadSessions(); }
+        return;
+      }
+
+      // Normal reply — strip the study topic marker from display
       const displayReply = rawReply.replace(/🔔\s*STUDY_TOPIC:[^\n]*/gi, '').trim();
       setChatMessages(prev => [...prev, { role: 'assistant', text: displayReply }]);
+
+      // Update session tracking
+      if ((data as any).sessionId) {
+        const newSid = (data as any).sessionId;
+        setCurrentSessionId(newSid);
+        loadSessions();
+      }
+
       const topic = detectStudyTopic(rawReply);
       if (topic) scheduleTestNotification(topic);
       if (twoPersonMode && source === 'voice') speakText(displayReply);
@@ -415,12 +496,71 @@ export default function App() {
     }
   };
 
-  // Render a message with clickable course links and URL detection
+  const handleNewChat = () => {
+    const p = ragSystem?.getUserProfile();
+    setChatMessages([{ role: 'assistant', text: `Starting a fresh chat! Hi ${p?.firstName || 'there'}, what would you like to explore today?` }]);
+    setCurrentSessionId(null);
+    setView('chat');
+  };
+
+  const handleLoadSession = async (sessionId: string) => {
+    setCurrentSessionId(sessionId);
+    setView('chat');
+    try {
+      const res = await fetch(`/api/mentor/sessions/${sessionId}/messages`, { credentials: 'include' });
+      if (res.ok) {
+        const data = await res.json();
+        if (Array.isArray(data.messages) && data.messages.length > 0) {
+          setChatMessages(data.messages.map((m: any) => ({ role: m.role, text: m.text })));
+        } else {
+          setChatMessages([]);
+        }
+      }
+    } catch {}
+  };
+
+  const handleClearChat = async () => {
+    if (!window.confirm('Clear all chat history? This cannot be undone.')) return;
+    try { await fetch('/api/mentor/history', { method: 'DELETE', credentials: 'include' }); } catch {}
+    const p = ragSystem?.getUserProfile();
+    setChatMessages([{ role: 'assistant', text: `Chat cleared! Hi ${p?.firstName || 'there'}, what would you like to work on today?` }]);
+    setSessions([]);
+    setCurrentSessionId(null);
+    showToast('✅ Chat history cleared');
+  };
+
+  // Render a message with clickable course links, media embeds, and URL detection
   const renderMessageContent = (text: string) => {
     const lines = text.split('\n');
     const elements: React.ReactNode[] = [];
 
     lines.forEach((line, li) => {
+      // Detect inline image embed: [IMAGE:url]
+      const imageEmbedMatch = line.match(/\[IMAGE:(https?:\/\/[^\]]+)\]/);
+      if (imageEmbedMatch) {
+        elements.push(
+          <div key={li} style={{ margin: '0.6rem 0' }}>
+            <img
+              src={imageEmbedMatch[1]}
+              alt="AI Generated"
+              style={{ maxWidth: '100%', borderRadius: 10, border: '1px solid var(--sp-border-color)' }}
+            />
+          </div>
+        );
+        return;
+      }
+
+      // Detect inline audio embed: [AUDIO:data:audio/...]
+      const audioEmbedMatch = line.match(/\[AUDIO:(data:audio\/[^\]]+)\]/);
+      if (audioEmbedMatch) {
+        elements.push(
+          <div key={li} style={{ margin: '0.6rem 0' }}>
+            <audio controls src={audioEmbedMatch[1]} style={{ width: '100%', borderRadius: 8 }} />
+          </div>
+        );
+        return;
+      }
+
       // Detect structured course line: 📚 COURSE: Title — https://...
       const courseMatch = line.match(/📚\s*COURSE:\s*(.+?)\s*[—–-]\s*(https?:\/\/\S+)/i);
       if (courseMatch) {
@@ -538,6 +678,8 @@ export default function App() {
     setIsLoggedIn(false);
     setView('chat');
     setChatMessages([]);
+    setSessions([]);
+    setCurrentSessionId(null);
     setCopilotUserKey(null);
     localStorage.removeItem('sahipath_profile');
     localStorage.removeItem('sp_copilot_user');
@@ -820,20 +962,55 @@ export default function App() {
                 </div>
               </>
             ) : null}
-            <div style={{ marginTop: '1.2rem', display: 'grid', gap: '0.5rem' }}>
+            <div style={{ marginTop: '1.2rem', display: 'grid', gap: '0.4rem' }}>
+              <button
+                onClick={handleNewChat}
+                style={{ padding: '0.6rem', textAlign: 'left', fontSize: '0.85rem', fontWeight: 600, background: 'var(--sp-accent-teal)', color: '#0a0f2d', border: 'none', borderRadius: 6, cursor: 'pointer' }}
+              >
+                ➕ New Chat
+              </button>
+
+              {sessions.length > 0 && (
+                <div style={{ marginTop: '0.2rem' }}>
+                  <div style={{ fontSize: '0.7rem', color: 'var(--sp-text-secondary)', textTransform: 'uppercase', letterSpacing: '0.05em', padding: '0.3rem 0.1rem', marginBottom: '0.2rem' }}>
+                    Recent Chats
+                  </div>
+                  <div style={{ maxHeight: '160px', overflowY: 'auto', display: 'flex', flexDirection: 'column', gap: '0.2rem' }}>
+                    {sessions.map(s => (
+                      <button
+                        key={s.id}
+                        onClick={() => handleLoadSession(s.id)}
+                        className={`sp-btn-secondary${currentSessionId === s.id ? ' sp-btn-active' : ''}`}
+                        title={s.title}
+                        style={{ padding: '0.45rem 0.6rem', textAlign: 'left', fontSize: '0.75rem', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}
+                      >
+                        💬 {s.title}
+                      </button>
+                    ))}
+                  </div>
+                </div>
+              )}
+
+              <div style={{ height: '1px', background: 'var(--sp-border-color)', margin: '0.3rem 0' }} />
+
               {([
                 ['chat', '💬 Chat'],
                 ['performance', '📈 Performance'],
                 ['tests', '📝 Tests'],
                 ['resume', '📄 Resume'],
                 ['jobs', '💼 Jobs'],
-                ['media', '🎙️ Media'],
               ] as const).map(([v, label]) => (
                 <button key={v} onClick={() => setView(v as any)} className={`sp-btn-secondary${view === v ? ' sp-btn-active' : ''}`} style={{ padding: '0.6rem', textAlign: 'left', fontSize: '0.85rem' }}>
                   {label}
                 </button>
               ))}
-              <button onClick={handleLogout} className="sp-btn-secondary" style={{ padding: '0.6rem', fontSize: '0.85rem', marginTop: '0.3rem' }}>
+
+              <div style={{ height: '1px', background: 'var(--sp-border-color)', margin: '0.3rem 0' }} />
+
+              <button onClick={handleClearChat} className="sp-btn-secondary" style={{ padding: '0.6rem', fontSize: '0.85rem', color: 'var(--sp-accent-coral)', textAlign: 'left' }}>
+                🗑️ Clear Chat
+              </button>
+              <button onClick={handleLogout} className="sp-btn-secondary" style={{ padding: '0.6rem', fontSize: '0.85rem', textAlign: 'left' }}>
                 🔄 {t['restart'] || 'Restart'}
               </button>
             </div>
@@ -907,45 +1084,6 @@ export default function App() {
           {view === 'resume' && <ResumeView profile={profile} />}
 
           {view === 'jobs' && <JobsView profile={profile} />}
-
-          {view === 'media' && (
-            <div style={{ padding: '1.5rem' }}>
-              <h3 style={{ marginTop: 0 }}>AI Media Generation</h3>
-              <p style={{ color: 'var(--sp-text-secondary)', fontSize: '0.9rem', marginBottom: '1.2rem' }}>
-                Generate career-related audio podcasts and images using AI. Requires <code style={{ background: 'var(--sp-bg-tertiary)', padding: '0.1rem 0.3rem', borderRadius: 4 }}>OPENAI_API_KEY</code> to be set.
-              </p>
-              <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '0.8rem' }}>
-                {[
-                  { type: 'podcast', label: '🎙️ Career Advice Podcast', prompt: `Generate a 2-minute motivational career advice podcast for someone working as ${profile?.currentRole || 'a professional'} with skills in ${profile?.skills?.slice(0, 3).join(', ') || 'technology'}.` },
-                  { type: 'image', label: '🖼️ Career Success Banner', prompt: `Professional career banner for ${profile?.currentRole || 'a developer'} with skills in ${profile?.skills?.slice(0, 3).join(', ') || 'technology'}. Motivational, dark tech aesthetic.` },
-                ].map(item => (
-                  <button key={item.type} className="sp-btn-secondary" style={{ padding: '1.2rem', fontSize: '0.9rem', textAlign: 'center' }}
-                    onClick={async () => {
-                      showToast('⏳ Generating media...');
-                      try {
-                        const r = await fetch('/api/media', { method: 'POST', headers: { 'Content-Type': 'application/json' }, credentials: 'include', body: JSON.stringify({ type: item.type, prompt: item.prompt }) });
-                        const d = await r.json();
-                        if (!r.ok) { showToast(`❌ ${d.error || 'Failed'}`); return; }
-                        if (item.type === 'podcast' && d.url) {
-                          const w = window.open('', '_blank');
-                          if (w) { w.document.write(`<title>Podcast</title><audio controls autoplay src="${d.url}" style="width:100%;margin:2rem auto;display:block"></audio>`); }
-                          showToast('🎙️ Podcast ready — check the new tab!');
-                        } else if (item.type === 'image' && d.url) {
-                          const w = window.open('', '_blank');
-                          if (w) { w.document.write(`<title>Career Banner</title><img src="${d.url}" style="max-width:100%"/>`); }
-                          showToast('🖼️ Image ready — check the new tab!');
-                        }
-                      } catch { showToast('❌ Media generation failed. Is OPENAI_API_KEY set?'); }
-                    }}>
-                    {item.label}
-                  </button>
-                ))}
-              </div>
-              <div style={{ marginTop: '1rem', padding: '0.8rem', background: 'var(--sp-bg-tertiary)', borderRadius: 8, fontSize: '0.8rem', color: 'var(--sp-text-secondary)' }}>
-                To enable media generation, add <code>OPENAI_API_KEY</code> in Replit Secrets.
-              </div>
-            </div>
-          )}
         </div>
       </div>
     </div>
