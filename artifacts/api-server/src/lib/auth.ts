@@ -65,8 +65,9 @@ export async function verifyToken(token: string): Promise<TokenPayload | null> {
     const expected = crypto
       .createHmac("sha256", getJwtSecret())
       .update(`${header}.${body}`)
-      .digest("base64url");
-    if (expected !== sig) return null;
+      .digest();
+    const sigBuf = Buffer.from(sig, "base64url");
+    if (expected.length !== sigBuf.length || !crypto.timingSafeEqual(expected, sigBuf)) return null;
     const payload = JSON.parse(base64urlDecode(body)) as TokenPayload;
     if (!payload.id || !payload.email) return null;
     if (payload.exp < Math.floor(Date.now() / 1000)) return null;
