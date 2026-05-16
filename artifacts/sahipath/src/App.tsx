@@ -233,6 +233,21 @@ export default function App() {
     } catch {}
   };
 
+  // Load server-side conversation history for logged-in users
+  const loadChatHistory = async () => {
+    try {
+      const res = await fetch('/api/mentor/history');
+      if (res.ok) {
+        const data = await res.json();
+        if (Array.isArray(data.messages) && data.messages.length > 0) {
+          setChatMessages(data.messages.map((m: any) => ({ role: m.role, text: m.text })));
+          return true;
+        }
+      }
+    } catch {}
+    return false;
+  };
+
   // Restore session on load
   useEffect(() => {
     const tryRestore = async () => {
@@ -249,9 +264,13 @@ export default function App() {
             setLanguage(profile.language || 'English');
             setIsLoggedIn(true);
             setStage('mentor');
-            setChatMessages([{ role: 'assistant', text: `Welcome back, ${profile.firstName}! How can I help you today?` }]);
             const uKey = data?.user?.email || profile.email || null;
             if (uKey) { setCopilotUserKey(uKey); localStorage.setItem('sp_copilot_user', uKey); }
+            // Load persisted history, fall back to welcome message
+            const hasHistory = await loadChatHistory();
+            if (!hasHistory) {
+              setChatMessages([{ role: 'assistant', text: `Welcome back, ${profile.firstName}! How can I help you today?` }]);
+            }
             return;
           }
         }
@@ -381,7 +400,7 @@ export default function App() {
     const profile = ragSystem.getUserProfile();
     try {
       const data = await mentorMutation.mutateAsync({
-        data: { message: userMsg, profile: profile as any, mode: source }
+        data: { message: userMsg, profile: profile as any, mode: source, history: chatMessages.slice(-20) } as any
       });
       const rawReply = data.reply || 'No reply returned.';
       // Strip the STUDY_TOPIC marker from displayed text (it's only for internal use)

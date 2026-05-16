@@ -1,6 +1,10 @@
 import { Router } from "express";
+import { db } from "@workspace/db";
+import { chatMessagesTable } from "@workspace/db";
+import { eq, desc } from "drizzle-orm";
 import { rateLimit } from "../lib/rateLimit";
 import { logger } from "../lib/logger";
+import { parseRequestToken, verifyToken } from "../lib/auth";
 
 const router = Router();
 
@@ -12,8 +16,11 @@ interface GeminiResponse {
   error?: { code?: number; message?: string; status?: string };
 }
 
-// Models available on this API key (verified via ListModels)
-// 1.5 models are not available; only 2.x and 2.5 models are accessible
+interface HistoryMessage {
+  role: string;
+  text: string;
+}
+
 const GEMINI_MODELS = [
   "gemini-2.5-flash",
   "gemini-2.5-flash-lite",
@@ -31,7 +38,6 @@ async function callGemini(
 ): Promise<{ reply: string } | { error: string; status: number }> {
   const rateLimited: string[] = [];
 
-  // First pass: skip rate-limited models, collect them for retry
   for (const model of GEMINI_MODELS) {
     const url = `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${encodeURIComponent(apiKey)}`;
     try {
@@ -77,7 +83,6 @@ async function callGemini(
     }
   }
 
-  // Second pass: retry rate-limited models after a short backoff
   if (rateLimited.length > 0) {
     await sleep(3000);
     for (const model of rateLimited) {
@@ -116,6 +121,64 @@ async function callGemini(
   };
 }
 
+const systemPromptText = [
+  "You are SahiPath, a focused AI career mentor for students and professionals in India.",
+  "Give thorough, practical, and actionable guidance. Never cut a response short — always complete your full answer.",
+  "Do not mention that you are a language model.",
+  "IMPORTANT — When you recommend a topic, course, or skill, ALWAYS suggest 1-2 real online resources using this exact format:",
+  "  📚 COURSE: [Course Title] — [full URL]",
+  "  Prefer free resources: YouTube playlists, Coursera free courses, freeCodeCamp, NPTEL, or official docs.",
+  "  Example: 📚 COURSE: CS50 Introduction to Computer Science — https://www.edx.org/cs50",
+  "If the user asks for a roadmap or study plan, include ALL key topics with 2-3 course links covering each phase.",
+  "When you mention a topic the user should study today, end your reply with:",
+  "  🔔 STUDY_TOPIC: [exact topic name]",
+  "  This is used to schedule an end-of-day test reminder.",
+  "Keep replies clear and plain text; avoid markdown code fences unless the user asks for code.",
+].join(" ");
+
+router.get("/mentor/history", async (req, res) => {
+  const token = parseRequestToken(req.headers as any);
+  if (!token) return res.status(401).json({ error: "Unauthorized" });
+  const payload = await verifyToken(token);
+  if (!payload) return res.status(401).json({ error: "Unauthorized" });
+
+  try {
+    const messages = await db
+      .select()
+      .from(chatMessagesTable)
+      .where(eq(chatMessagesTable.userId, payload.id))
+      .orderBy(desc(chatMessagesTable.createdAt))
+      .limit(100);
+
+    const ordered = messages.reverse().map((m) => ({
+      role: m.role,
+      text: m.content,
+      mode: m.mode,
+      createdAt: m.createdAt,
+    }));
+
+    return res.json({ messages: ordered });
+  } catch (err) {
+    logger.error({ err }, "Failed to load chat history");
+    return res.status(500).json({ error: "Failed to load history" });
+  }
+});
+
+router.delete("/mentor/history", async (req, res) => {
+  const token = parseRequestToken(req.headers as any);
+  if (!token) return res.status(401).json({ error: "Unauthorized" });
+  const payload = await verifyToken(token);
+  if (!payload) return res.status(401).json({ error: "Unauthorized" });
+
+  try {
+    await db.delete(chatMessagesTable).where(eq(chatMessagesTable.userId, payload.id));
+    return res.json({ ok: true });
+  } catch (err) {
+    logger.error({ err }, "Failed to clear chat history");
+    return res.status(500).json({ error: "Failed to clear history" });
+  }
+});
+
 router.post("/mentor/chat", async (req, res) => {
   const ip = String(req.headers["x-forwarded-for"] ?? req.ip ?? "unknown");
   const { limited } = rateLimit(`${ip}:mentor-chat`, 20, 60_000);
@@ -125,6 +188,7 @@ router.post("/mentor/chat", async (req, res) => {
   const message = typeof body.message === "string" ? body.message.trim() : null;
   const profile = body.profile ?? null;
   const mode = typeof body.mode === "string" ? body.mode : "text";
+  const historyRaw = Array.isArray(body.history) ? (body.history as HistoryMessage[]) : [];
 
   if (!message) return res.status(400).json({ error: "message is required" });
 
@@ -133,37 +197,41 @@ router.post("/mentor/chat", async (req, res) => {
     return res.status(503).json({ error: "GEMINI_API_KEY is not configured" });
   }
 
-  const systemPrompt = [
-    "You are SahiPath, a focused AI career mentor for students and professionals in India.",
-    "Give concise, practical, and actionable guidance.",
-    "Do not mention that you are a language model.",
-    "IMPORTANT — When you recommend a topic, course, or skill, ALWAYS suggest 1-2 real online resources using this exact format:",
-    '  📚 COURSE: [Course Title] — [full URL]',
-    "  Prefer free resources: YouTube playlists, Coursera free courses, freeCodeCamp, NPTEL, or official docs.",
-    "  Example: 📚 COURSE: CS50 Introduction to Computer Science — https://www.edx.org/cs50",
-    "If the user asks for a roadmap or study plan, include at least 2-3 course links covering the key topics.",
-    "When you mention a topic the user should study today, end your reply with:",
-    '  🔔 STUDY_TOPIC: [exact topic name]',
-    "  This is used to schedule an end-of-day test reminder.",
-    "Keep replies clear and plain text; avoid markdown code fences unless the user asks for code.",
-  ].join(" ");
-
   const profileContext = profile
     ? JSON.stringify(profile, null, 2)
     : "No profile provided.";
 
+  const contextPreamble = `Mode: ${mode}\n\nUser profile:\n${profileContext}`;
+
+  const contents: Array<{ role: string; parts: Array<{ text: string }> }> = [];
+
+  if (historyRaw.length > 0) {
+    const recentHistory = historyRaw.slice(-20);
+    for (const msg of recentHistory) {
+      const geminiRole = msg.role === "assistant" ? "model" : "user";
+      if (contents.length === 0 && geminiRole === "user") {
+        contents.push({ role: "user", parts: [{ text: `${contextPreamble}\n\n${msg.text}` }] });
+      } else {
+        contents.push({ role: geminiRole, parts: [{ text: msg.text }] });
+      }
+    }
+    contents.push({ role: "user", parts: [{ text: message }] });
+  } else {
+    contents.push({
+      role: "user",
+      parts: [{ text: `${contextPreamble}\n\nUser message:\n${message}` }],
+    });
+  }
+
   const payload = {
-    contents: [
-      {
-        role: "user",
-        parts: [
-          {
-            text: `${systemPrompt}\n\nMode: ${mode}\n\nUser profile:\n${profileContext}\n\nUser message:\n${message}`,
-          },
-        ],
-      },
-    ],
-    generationConfig: { temperature: 0.7, maxOutputTokens: 1024 },
+    system_instruction: {
+      parts: [{ text: systemPromptText }],
+    },
+    contents,
+    generationConfig: {
+      temperature: 0.7,
+      maxOutputTokens: 8192,
+    },
   };
 
   try {
@@ -171,6 +239,19 @@ router.post("/mentor/chat", async (req, res) => {
     if ("error" in result) {
       return res.status(result.status).json({ error: result.error });
     }
+
+    const token = parseRequestToken(req.headers as any);
+    if (token) {
+      const tokenPayload = await verifyToken(token);
+      if (tokenPayload) {
+        const userId = tokenPayload.id;
+        await db.insert(chatMessagesTable).values([
+          { userId, role: "user", content: message, mode },
+          { userId, role: "assistant", content: result.reply, mode: "text" },
+        ]).catch((err) => logger.warn({ err }, "Failed to save chat messages"));
+      }
+    }
+
     logger.info({ mode }, "mentor chat replied");
     return res.json({ reply: result.reply });
   } catch (err: unknown) {
