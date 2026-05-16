@@ -16,5 +16,6 @@ router.use(profileRouter);
 router.use(testsRouter);
 router.use(mediaRouter);
 router.use("/copilotkit", copilotKitRouter);
+router.use("/copilot", copilotKitRouter);
 
 export default router;
