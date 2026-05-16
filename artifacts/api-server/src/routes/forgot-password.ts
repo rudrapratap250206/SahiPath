@@ -56,24 +56,28 @@ router.post("/auth/forgot-password", async (req, res) => {
 
     const transporter = getTransporter();
     if (transporter) {
-      await transporter.sendMail({
-        from: `"SahiPath" <${process.env["SMTP_EMAIL"]}>`,
-        to: email,
-        subject: "SahiPath Password Reset Code",
-        html: `
-          <div style="font-family:sans-serif;max-width:480px;margin:auto">
-            <h2 style="color:#4f8ef7">🔐 Reset Your SahiPath Password</h2>
-            <p>You requested a password reset. Use the code below — it expires in 15 minutes.</p>
-            <div style="font-size:2.5rem;font-weight:bold;letter-spacing:0.3rem;text-align:center;padding:1.5rem;background:#f0f4ff;border-radius:8px;color:#1a1a2e">
-              ${otp}
+      try {
+        await transporter.sendMail({
+          from: `"SahiPath" <${process.env["SMTP_EMAIL"]}>`,
+          to: email,
+          subject: "SahiPath Password Reset Code",
+          html: `
+            <div style="font-family:sans-serif;max-width:480px;margin:auto">
+              <h2 style="color:#4f8ef7">🔐 Reset Your SahiPath Password</h2>
+              <p>You requested a password reset. Use the code below — it expires in 15 minutes.</p>
+              <div style="font-size:2.5rem;font-weight:bold;letter-spacing:0.3rem;text-align:center;padding:1.5rem;background:#f0f4ff;border-radius:8px;color:#1a1a2e">
+                ${otp}
+              </div>
+              <p style="color:#666;font-size:0.9rem;margin-top:1.5rem">If you didn't request this, ignore this email — your account is safe.</p>
             </div>
-            <p style="color:#666;font-size:0.9rem;margin-top:1.5rem">If you didn't request this, ignore this email — your account is safe.</p>
-          </div>
-        `,
-      });
-      logger.info({ userId: user.id }, "Password reset email sent");
+          `,
+        });
+        logger.info({ userId: user.id }, "Password reset email sent");
+      } catch (emailErr) {
+        logger.error({ err: emailErr }, "Failed to send password reset email — check SMTP_EMAIL and SMTP_APP_PASSWORD secrets");
+      }
     } else {
-      logger.warn("SMTP not configured — OTP generated but not sent");
+      logger.warn("SMTP not configured — SMTP_EMAIL or SMTP_APP_PASSWORD secret is missing");
     }
 
     return res.json({ ok: true, message: "If that email is registered, you will receive a reset code." });
