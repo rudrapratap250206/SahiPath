@@ -127,6 +127,7 @@ export default function App() {
   const [forgotNewPassword, setForgotNewPassword] = useState('');
   const [forgotError, setForgotError] = useState<string | null>(null);
   const [forgotLoading, setForgotLoading] = useState(false);
+  const [forgotOnScreenCode, setForgotOnScreenCode] = useState<string | null>(null);
   const [authEmail, setAuthEmail] = useState('');
   const [authPassword, setAuthPassword] = useState('');
   const [authError, setAuthError] = useState<string | null>(null);
@@ -732,6 +733,13 @@ export default function App() {
                         try {
                           const res = await fetch('/api/auth/forgot-password', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ email: forgotEmail.trim() }) });
                           if (!res.ok) { const d = await res.json(); setForgotError(d.error || 'Something went wrong'); return; }
+                          const data = await res.json();
+                          if (!data.emailSent && data.code) {
+                            setForgotOnScreenCode(data.code);
+                            setForgotOTP(data.code);
+                          } else {
+                            setForgotOnScreenCode(null);
+                          }
                           setForgotStep('otp');
                         } catch { setForgotError('Network error. Please try again.'); }
                         finally { setForgotLoading(false); }
@@ -744,7 +752,15 @@ export default function App() {
               )}
               {forgotStep === 'otp' && (
                 <div style={{ display: 'flex', flexDirection: 'column', gap: '0.6rem' }}>
-                  <p style={{ margin: 0, fontSize: '0.88rem', color: 'var(--sp-text-secondary)' }}>A 6-digit code was sent to <strong>{forgotEmail}</strong>. Enter it below along with your new password.</p>
+                  {forgotOnScreenCode ? (
+                    <div style={{ background: 'rgba(79,142,247,0.08)', border: '1.5px solid var(--sp-accent-blue)', borderRadius: 10, padding: '0.9rem 1rem' }}>
+                      <p style={{ margin: '0 0 0.4rem', fontSize: '0.82rem', color: 'var(--sp-text-secondary)' }}>Email could not be sent. Here is your reset code — it expires in 15 minutes:</p>
+                      <div style={{ fontSize: '2rem', fontWeight: 700, letterSpacing: '0.35rem', textAlign: 'center', color: 'var(--sp-accent-blue)', fontFamily: 'monospace' }}>{forgotOnScreenCode}</div>
+                      <p style={{ margin: '0.4rem 0 0', fontSize: '0.78rem', color: 'var(--sp-text-secondary)', textAlign: 'center' }}>It has been filled in below automatically.</p>
+                    </div>
+                  ) : (
+                    <p style={{ margin: 0, fontSize: '0.88rem', color: 'var(--sp-text-secondary)' }}>A 6-digit code was sent to <strong>{forgotEmail}</strong>. Enter it below along with your new password.</p>
+                  )}
                   <input
                     type="text"
                     placeholder="6-digit code"
@@ -776,7 +792,7 @@ export default function App() {
                       }}>
                       {forgotLoading ? '⏳ Resetting...' : 'Reset Password'}
                     </button>
-                    <button className="sp-btn-secondary" onClick={() => { setForgotStep('email'); setForgotOTP(''); setForgotNewPassword(''); setForgotError(null); }}>Back</button>
+                    <button className="sp-btn-secondary" onClick={() => { setForgotStep('email'); setForgotOTP(''); setForgotNewPassword(''); setForgotError(null); setForgotOnScreenCode(null); }}>Back</button>
                   </div>
                 </div>
               )}

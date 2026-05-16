@@ -54,6 +54,7 @@ router.post("/auth/forgot-password", async (req, res) => {
       client.release();
     }
 
+    let emailSent = false;
     const transporter = getTransporter();
     if (transporter) {
       try {
@@ -72,15 +73,21 @@ router.post("/auth/forgot-password", async (req, res) => {
             </div>
           `,
         });
+        emailSent = true;
         logger.info({ userId: user.id }, "Password reset email sent");
       } catch (emailErr) {
-        logger.error({ err: emailErr }, "Failed to send password reset email — check SMTP_EMAIL and SMTP_APP_PASSWORD secrets");
+        logger.error({ err: emailErr }, "Failed to send password reset email — showing code on screen instead");
       }
     } else {
-      logger.warn("SMTP not configured — SMTP_EMAIL or SMTP_APP_PASSWORD secret is missing");
+      logger.warn("SMTP not configured — showing code on screen");
     }
 
-    return res.json({ ok: true, message: "If that email is registered, you will receive a reset code." });
+    // If email couldn't be sent, return the code directly so the user can still reset
+    if (emailSent) {
+      return res.json({ ok: true, emailSent: true });
+    } else {
+      return res.json({ ok: true, emailSent: false, code: otp });
+    }
   } catch (err) {
     logger.error({ err }, "forgot-password error");
     return res.status(500).json({ error: "Internal error" });
