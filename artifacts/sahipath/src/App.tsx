@@ -7,6 +7,7 @@ import { TestsView } from './components/TestsView';
 import { PerformanceView } from './components/PerformanceView';
 import { ResumeView } from './components/ResumeView';
 import { JobsView } from './components/JobsView';
+import { HistoryView } from './components/HistoryView';
 import { CopilotKit, useCopilotReadable, useCopilotAction } from '@copilotkit/react-core';
 import { CopilotPopup } from '@copilotkit/react-ui';
 import '@copilotkit/react-ui/styles.css';
@@ -112,7 +113,8 @@ export default function App() {
   const [language, setLanguage] = useState<string | null>(null);
   const [isSpeaking, setIsSpeaking] = useState(false);
   const [twoPersonMode, setTwoPersonMode] = useState(false);
-  const [view, setView] = useState<'chat' | 'performance' | 'tests' | 'resume' | 'jobs'>('chat');
+  const [view, setView] = useState<'chat' | 'performance' | 'tests' | 'resume' | 'jobs' | 'history'>('chat');
+  const [newTestAlert, setNewTestAlert] = useState<{ topic: string; score: number } | null>(null);
   const [currentSessionId, setCurrentSessionId] = useState<string | null>(null);
   const [sessions, setSessions] = useState<Array<{ id: string; title: string; createdAt: string }>>([]);
   const [showLogin, setShowLogin] = useState(false);
@@ -995,6 +997,7 @@ export default function App() {
 
               {([
                 ['chat', '💬 Chat'],
+                ['history', '📜 History'],
                 ['performance', '📈 Performance'],
                 ['tests', '📝 Tests'],
                 ['resume', '📄 Resume'],
@@ -1072,18 +1075,29 @@ export default function App() {
             </>
           )}
 
-          {view === 'performance' && <PerformanceView />}
+          {view === 'performance' && (
+            <PerformanceView
+              newTestAlert={newTestAlert}
+              onAlertDismissed={() => setNewTestAlert(null)}
+            />
+          )}
 
           {view === 'tests' && (
             <TestsView
               pendingTopic={pendingTestTopic}
               onTopicHandled={() => setPendingTestTopic(null)}
+              onTestRecorded={(topic, score) => {
+                setNewTestAlert({ topic, score });
+                setView('performance');
+              }}
             />
           )}
 
           {view === 'resume' && <ResumeView profile={profile} />}
 
           {view === 'jobs' && <JobsView profile={profile} />}
+
+          {view === 'history' && <HistoryView />}
         </div>
       </div>
     </div>
