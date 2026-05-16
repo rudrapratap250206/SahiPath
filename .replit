@@ -39,7 +39,7 @@ externalPort = 3002
 
 [userenv.shared]
 GEMINI_API_KEY = "AIzaSyAZnCOOrBCOgqYJgsHq1DERgd_cxLzlmtc"
-SMTP_APP_PASSWORD = "AIzaSyAUy5KA_N7FPcET_oc-ZvP72f2A7m0ttLw"
+SMTP_APP_PASSWORD = "uxqpwlmfblfpport"
 SMTP_EMAIL = "AIzaSyBA4Bd6iBRunnTQlGrbhXjAm6IlxOIIxP8"
 JWT_SECRET = "b9ea74f10f7494eba866dcdbb72bd625420b27bece61dede454283694e1175afc0fac1f39248fe1774e89c5bc95f60a6ef7d48dd491143ea7e4ec250215dec79"
 
