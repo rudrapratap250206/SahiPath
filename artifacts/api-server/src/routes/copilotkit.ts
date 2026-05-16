@@ -1,6 +1,5 @@
 import { Router } from "express";
-import { CopilotRuntime, GoogleGenerativeAIAdapter } from "@copilotkit/runtime";
-import { createCopilotExpressHandler } from "@copilotkit/runtime/v2/express";
+import { CopilotRuntime, GoogleGenerativeAIAdapter, copilotRuntimeNodeHttpEndpoint } from "@copilotkit/runtime";
 import { GoogleGenerativeAI } from "@google/generative-ai";
 
 const apiKey = process.env.GEMINI_API_KEY?.trim();
@@ -24,16 +23,15 @@ if (!apiKey) {
   const model = genAI.getGenerativeModel({ model: "gemini-2.5-flash" });
   const serviceAdapter = new GoogleGenerativeAIAdapter({ model });
 
-  const runtime = new CopilotRuntime();
-  runtime.handleServiceAdapter(serviceAdapter);
-
-  const copilotHandler = createCopilotExpressHandler({
-    runtime: runtime.instance,
-    basePath: "/",
-    cors: false,
+  copilotRouter.use((req, res, next) => {
+    const runtime = new CopilotRuntime();
+    const handler = copilotRuntimeNodeHttpEndpoint({
+      endpoint: "/copilotkit",
+      runtime,
+      serviceAdapter,
+    });
+    return handler(req, res, next);
   });
-
-  copilotRouter.use(copilotHandler);
 }
 
 export default copilotRouter;
