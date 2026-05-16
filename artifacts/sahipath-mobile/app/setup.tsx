@@ -104,9 +104,7 @@ export default function SetupScreen() {
   });
 
   const handleNext = () => {
-    if (!personal.firstName.trim() || !personal.currentRole.trim()) {
-      return;
-    }
+    if (!personal.firstName.trim() || !personal.currentRole.trim()) return;
     Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
     setStep("professional");
   };
@@ -143,10 +141,6 @@ export default function SetupScreen() {
     }
   };
 
-  const handleSkip = () => {
-    router.replace("/(tabs)");
-  };
-
   if (step === "personal") {
     return (
       <View style={s.container}>
@@ -164,7 +158,7 @@ export default function SetupScreen() {
             <Text style={s.label}>First Name *</Text>
             <TextInput style={s.input} value={personal.firstName}
               onChangeText={(v) => setPersonal((p) => ({ ...p, firstName: v }))}
-              placeholder="Rahul" placeholderTextColor={colors.mutedForeground} />
+              placeholder="Rahul" placeholderTextColor={colors.mutedForeground} testID="first-name-input" />
           </View>
           <View style={s.field}>
             <Text style={s.label}>Last Name</Text>
@@ -188,7 +182,8 @@ export default function SetupScreen() {
             <Text style={s.label}>Current Role / What you do *</Text>
             <TextInput style={s.input} value={personal.currentRole}
               onChangeText={(v) => setPersonal((p) => ({ ...p, currentRole: v }))}
-              placeholder="Student / Software Engineer" placeholderTextColor={colors.mutedForeground} />
+              placeholder="Student / Software Engineer" placeholderTextColor={colors.mutedForeground}
+              testID="current-role-input" />
           </View>
           <View style={s.field}>
             <Text style={s.label}>Years of Experience</Text>
@@ -213,10 +208,10 @@ export default function SetupScreen() {
             </View>
           </View>
 
-          <Pressable style={s.btn} onPress={handleNext}>
+          <Pressable style={s.btn} onPress={handleNext} testID="next-btn">
             <Text style={s.btnText}>Next →</Text>
           </Pressable>
-          <Pressable style={s.btnSecondary} onPress={handleSkip}>
+          <Pressable style={s.btnSecondary} onPress={() => router.replace("/(tabs)")}>
             <Text style={s.btnSecText}>Skip for now</Text>
           </Pressable>
         </ScrollView>
@@ -241,14 +236,14 @@ export default function SetupScreen() {
           <TextInput style={[s.input, { minHeight: 60 }]} value={professional.skills}
             onChangeText={(v) => setProfessional((p) => ({ ...p, skills: v }))}
             placeholder="Python, React, Data Analysis" placeholderTextColor={colors.mutedForeground}
-            multiline />
+            multiline testID="skills-input" />
         </View>
         <View style={s.field}>
           <Text style={s.label}>Career Interests (comma-separated) *</Text>
           <TextInput style={[s.input, { minHeight: 60 }]} value={professional.careerInterests}
             onChangeText={(v) => setProfessional((p) => ({ ...p, careerInterests: v }))}
             placeholder="Machine Learning, Web Dev, Product Management" placeholderTextColor={colors.mutedForeground}
-            multiline />
+            multiline testID="interests-input" />
         </View>
         <View style={s.field}>
           <Text style={s.label}>Current Goals</Text>
@@ -287,7 +282,7 @@ export default function SetupScreen() {
           </View>
         </View>
 
-        <Pressable style={[s.btn, loading && { opacity: 0.6 }]} onPress={handleFinish} disabled={loading}>
+        <Pressable style={[s.btn, loading && { opacity: 0.6 }]} onPress={handleFinish} disabled={loading} testID="finish-btn">
           {loading ? <ActivityIndicator size="small" color={colors.primaryForeground} />
             : <Text style={s.btnText}>Start My Journey</Text>}
         </Pressable>

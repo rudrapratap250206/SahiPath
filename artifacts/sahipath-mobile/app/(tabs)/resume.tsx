@@ -3,7 +3,6 @@ import * as Haptics from "expo-haptics";
 import { router } from "expo-router";
 import React from "react";
 import {
-  Alert,
   Platform,
   Pressable,
   ScrollView,
@@ -77,7 +76,6 @@ export default function ResumeScreen() {
       alignItems: "center",
       justifyContent: "space-between",
     },
-    headerLeft: {},
     headerTitle: { fontSize: 24, fontFamily: "Inter_700Bold", color: colors.foreground },
     headerSub: { fontSize: 14, color: colors.mutedForeground, fontFamily: "Inter_400Regular", marginTop: 2 },
     body: { padding: 20 },
@@ -144,7 +142,7 @@ export default function ResumeScreen() {
     return (
       <View style={s.container}>
         <View style={s.header}>
-          <View style={s.headerLeft}>
+          <View>
             <Text style={s.headerTitle}>Resume</Text>
             <Text style={s.headerSub}>Your career profile</Text>
           </View>
@@ -156,7 +154,7 @@ export default function ResumeScreen() {
               No profile yet
             </Text>
             <Text style={{ fontSize: 14, color: colors.mutedForeground, fontFamily: "Inter_400Regular", marginTop: 6, textAlign: "center" }}>
-              Complete your profile setup to generate your resume.
+              Complete your profile setup to build your resume.
             </Text>
             <Pressable
               style={{ marginTop: 20, backgroundColor: colors.primary, borderRadius: 10, paddingHorizontal: 24, paddingVertical: 12 }}
@@ -177,11 +175,11 @@ export default function ResumeScreen() {
   return (
     <View style={s.container}>
       <View style={s.header}>
-        <View style={s.headerLeft}>
+        <View>
           <Text style={s.headerTitle}>Resume</Text>
           <Text style={s.headerSub}>Your career profile</Text>
         </View>
-        <Pressable style={s.logoutBtn} onPress={handleLogout}>
+        <Pressable style={s.logoutBtn} onPress={handleLogout} testID="logout-btn">
           <Feather name="log-out" size={14} color={colors.destructive} />
           <Text style={{ fontSize: 13, fontFamily: "Inter_500Medium", color: colors.destructive }}>Sign out</Text>
         </Pressable>
@@ -202,26 +200,28 @@ export default function ResumeScreen() {
         </View>
 
         <View style={s.card}>
-          <Section title="Contact" colors={colors}>
-            {profile.email && (
-              <View style={s.infoRow}>
-                <Feather name="mail" size={14} color={colors.primary} />
-                <Text style={s.infoText}>{profile.email}</Text>
-              </View>
-            )}
-            {profile.location && (
-              <View style={s.infoRow}>
-                <Feather name="map-pin" size={14} color={colors.primary} />
-                <Text style={s.infoText}>{profile.location}</Text>
-              </View>
-            )}
-            {profile.age && (
-              <View style={s.infoRow}>
-                <Feather name="user" size={14} color={colors.primary} />
-                <Text style={s.infoText}>Age {profile.age}</Text>
-              </View>
-            )}
-          </Section>
+          {(profile.email || profile.location || profile.age) && (
+            <Section title="Contact" colors={colors}>
+              {profile.email && (
+                <View style={s.infoRow}>
+                  <Feather name="mail" size={14} color={colors.primary} />
+                  <Text style={s.infoText}>{profile.email}</Text>
+                </View>
+              )}
+              {profile.location && (
+                <View style={s.infoRow}>
+                  <Feather name="map-pin" size={14} color={colors.primary} />
+                  <Text style={s.infoText}>{profile.location}</Text>
+                </View>
+              )}
+              {profile.age !== undefined && (
+                <View style={s.infoRow}>
+                  <Feather name="user" size={14} color={colors.primary} />
+                  <Text style={s.infoText}>{profile.age} years old</Text>
+                </View>
+              )}
+            </Section>
+          )}
 
           {(profile.yearsOfExperience !== undefined || profile.educationLevel) && (
             <Section title="Experience" colors={colors}>
@@ -278,7 +278,9 @@ export default function ResumeScreen() {
             <Section title="Test Performance" colors={colors}>
               <View style={s.infoRow}>
                 <Feather name="bar-chart-2" size={14} color={colors.primary} />
-                <Text style={s.infoText}>Average score: {avgScore}% across {tests.length} test{tests.length !== 1 ? "s" : ""}</Text>
+                <Text style={s.infoText}>
+                  Average score: {avgScore}% across {tests.length} test{tests.length !== 1 ? "s" : ""}
+                </Text>
               </View>
             </Section>
           )}

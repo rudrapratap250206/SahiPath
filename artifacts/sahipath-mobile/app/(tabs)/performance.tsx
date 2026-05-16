@@ -19,8 +19,8 @@ interface TestRecord {
   date: string;
 }
 
-function StatCard({ label, value, sub, color, colors }: {
-  label: string; value: string; sub?: string; color: string; colors: ReturnType<typeof useColors>;
+function StatCard({ label, value, color, colors }: {
+  label: string; value: string; color: string; colors: ReturnType<typeof useColors>;
 }) {
   return (
     <View style={{
@@ -34,7 +34,6 @@ function StatCard({ label, value, sub, color, colors }: {
     }}>
       <Text style={{ fontSize: 28, fontFamily: "Inter_700Bold", color }}>{value}</Text>
       <Text style={{ fontSize: 12, color: colors.mutedForeground, fontFamily: "Inter_500Medium", marginTop: 2 }}>{label}</Text>
-      {sub && <Text style={{ fontSize: 11, color: colors.mutedForeground, fontFamily: "Inter_400Regular", marginTop: 1 }}>{sub}</Text>}
     </View>
   );
 }
@@ -53,11 +52,11 @@ export default function PerformanceScreen() {
 
   const avg = tests.length > 0 ? Math.round(tests.reduce((s, t) => s + t.score, 0) / tests.length) : 0;
   const best = tests.length > 0 ? Math.max(...tests.map((t) => t.score)) : 0;
-  const trend = recent.length >= 2
-    ? recent[recent.length - 1].score - recent[0].score
-    : 0;
+  const trend = recent.length >= 2 ? recent[recent.length - 1].score - recent[0].score : 0;
+  const trendColor = trend > 5 ? "#22C55E" : trend < -5 ? colors.destructive : colors.primary;
 
   const CHART_HEIGHT = 140;
+  const maxScore = recent.length > 0 ? Math.max(...recent.map((t) => t.score), 60) : 100;
 
   const s = StyleSheet.create({
     container: { flex: 1, backgroundColor: colors.background },
@@ -102,9 +101,6 @@ export default function PerformanceScreen() {
     itemName: { flex: 1, fontSize: 14, fontFamily: "Inter_500Medium", color: colors.foreground },
     footer: { height: bottomPad + 80 },
   });
-
-  const maxScore = recent.length > 0 ? Math.max(...recent.map((t) => t.score), 60) : 100;
-  const trendColor = trend > 5 ? "#22C55E" : trend < -5 ? colors.destructive : colors.primary;
 
   return (
     <View style={s.container}>

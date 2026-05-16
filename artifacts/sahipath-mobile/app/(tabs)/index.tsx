@@ -79,7 +79,7 @@ export default function ChatScreen() {
     return [{
       id: "welcome",
       role: "assistant",
-      text: `Hi ${name}! I'm your SahiPath AI career mentor. Ask me anything about your career path, skills to develop, or job opportunities. I'm here to guide you!`,
+      text: `Hi ${name}! I'm your SahiPath AI career mentor. Ask me anything about your career path, skills to develop, or job opportunities.`,
     }];
   });
   const [input, setInput] = useState("");
@@ -201,22 +201,10 @@ export default function ChatScreen() {
       alignItems: "center",
       justifyContent: "center",
     },
-    emptyMsg: {
-      textAlign: "center",
-      color: colors.mutedForeground,
-      fontSize: 13,
-      fontFamily: "Inter_400Regular",
-      marginTop: 20,
-      paddingHorizontal: 40,
-    },
   });
 
   return (
-    <KeyboardAvoidingView
-      behavior="padding"
-      style={s.container}
-      keyboardVerticalOffset={0}
-    >
+    <KeyboardAvoidingView behavior="padding" style={s.container} keyboardVerticalOffset={0}>
       <View style={s.header}>
         <View style={s.headerIcon}>
           <Feather name="compass" size={18} color={colors.primary} />
@@ -246,11 +234,6 @@ export default function ChatScreen() {
             </View>
           ) : null
         }
-        ListFooterComponent={
-          messages.length === 0 ? (
-            <Text style={s.emptyMsg}>Ask your AI mentor anything to get started!</Text>
-          ) : null
-        }
       />
 
       <View style={s.inputRow}>
@@ -264,11 +247,13 @@ export default function ChatScreen() {
           returnKeyType="send"
           blurOnSubmit={false}
           onSubmitEditing={sendMessage}
+          testID="chat-input"
         />
         <Pressable
           style={[s.sendBtn, (!input.trim() || isTyping) && { opacity: 0.4 }]}
           onPress={sendMessage}
           disabled={!input.trim() || isTyping}
+          testID="send-btn"
         >
           <Feather name="send" size={16} color={colors.primaryForeground} />
         </Pressable>

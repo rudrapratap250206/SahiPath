@@ -4,7 +4,6 @@ import { router } from "expo-router";
 import React, { useState } from "react";
 import {
   ActivityIndicator,
-  Alert,
   KeyboardAvoidingView,
   Platform,
   Pressable,
@@ -45,20 +44,14 @@ export default function AuthScreen() {
   const bottomPad = Platform.OS === "web" ? 34 : insets.bottom;
 
   const s = StyleSheet.create({
-    container: {
-      flex: 1,
-      backgroundColor: colors.background,
-    },
+    container: { flex: 1, backgroundColor: colors.background },
     scroll: {
       flexGrow: 1,
       paddingTop: topPad + 24,
       paddingBottom: bottomPad + 24,
       paddingHorizontal: 24,
     },
-    logo: {
-      alignItems: "center",
-      marginBottom: 36,
-    },
+    logo: { alignItems: "center", marginBottom: 36 },
     logoIconWrap: {
       width: 64,
       height: 64,
@@ -83,9 +76,7 @@ export default function AuthScreen() {
       fontFamily: "Inter_400Regular",
       marginTop: 4,
     },
-    langSection: {
-      marginBottom: 28,
-    },
+    langSection: { marginBottom: 28 },
     langLabel: {
       fontSize: 13,
       color: colors.mutedForeground,
@@ -94,11 +85,7 @@ export default function AuthScreen() {
       textTransform: "uppercase",
       letterSpacing: 0.5,
     },
-    langGrid: {
-      flexDirection: "row",
-      flexWrap: "wrap",
-      gap: 8,
-    },
+    langGrid: { flexDirection: "row", flexWrap: "wrap", gap: 8 },
     langChip: {
       paddingHorizontal: 12,
       paddingVertical: 7,
@@ -108,10 +95,7 @@ export default function AuthScreen() {
       alignItems: "center",
       gap: 4,
     },
-    langChipText: {
-      fontSize: 13,
-      fontFamily: "Inter_500Medium",
-    },
+    langChipText: { fontSize: 13, fontFamily: "Inter_500Medium" },
     card: {
       backgroundColor: colors.card,
       borderRadius: 16,
@@ -126,22 +110,9 @@ export default function AuthScreen() {
       borderRadius: 10,
       padding: 4,
     },
-    toggleBtn: {
-      flex: 1,
-      paddingVertical: 9,
-      borderRadius: 8,
-      alignItems: "center",
-    },
-    toggleBtnText: {
-      fontSize: 14,
-      fontFamily: "Inter_600SemiBold",
-    },
-    label: {
-      fontSize: 13,
-      color: colors.mutedForeground,
-      fontFamily: "Inter_500Medium",
-      marginBottom: 6,
-    },
+    toggleBtn: { flex: 1, paddingVertical: 9, borderRadius: 8, alignItems: "center" },
+    toggleBtnText: { fontSize: 14, fontFamily: "Inter_600SemiBold" },
+    label: { fontSize: 13, color: colors.mutedForeground, fontFamily: "Inter_500Medium", marginBottom: 6 },
     input: {
       backgroundColor: colors.input,
       borderWidth: 1,
@@ -162,11 +133,7 @@ export default function AuthScreen() {
       padding: 10,
       marginBottom: 14,
     },
-    errorText: {
-      color: colors.destructive,
-      fontSize: 13,
-      fontFamily: "Inter_400Regular",
-    },
+    errorText: { color: colors.destructive, fontSize: 13, fontFamily: "Inter_400Regular" },
     btn: {
       backgroundColor: colors.primary,
       borderRadius: 12,
@@ -174,11 +141,7 @@ export default function AuthScreen() {
       alignItems: "center",
       marginTop: 4,
     },
-    btnText: {
-      fontSize: 15,
-      fontFamily: "Inter_700Bold",
-      color: colors.primaryForeground,
-    },
+    btnText: { fontSize: 15, fontFamily: "Inter_700Bold", color: colors.primaryForeground },
   });
 
   const handleSubmit = async () => {
@@ -200,10 +163,6 @@ export default function AuthScreen() {
     } finally {
       setLoading(false);
     }
-  };
-
-  const handleGuestContinue = () => {
-    router.replace("/setup");
   };
 
   return (
@@ -230,6 +189,7 @@ export default function AuthScreen() {
                     borderColor: active ? colors.primary : colors.border,
                   }]}
                   onPress={() => setSelectedLang(lang.code)}
+                  testID={`lang-${lang.code}`}
                 >
                   <Text style={{ fontSize: 14 }}>{lang.flag}</Text>
                   <Text style={[s.langChipText, { color: active ? colors.primary : colors.mutedForeground }]}>
@@ -250,6 +210,7 @@ export default function AuthScreen() {
                   key={m}
                   style={[s.toggleBtn, { backgroundColor: active ? colors.primary : "transparent" }]}
                   onPress={() => { setMode(m); setError(null); }}
+                  testID={`mode-${m}`}
                 >
                   <Text style={[s.toggleBtnText, { color: active ? colors.primaryForeground : colors.mutedForeground }]}>
                     {m === "login" ? "Sign In" : "Register"}
@@ -269,6 +230,7 @@ export default function AuthScreen() {
             keyboardType="email-address"
             autoCapitalize="none"
             autoCorrect={false}
+            testID="email-input"
           />
 
           <Text style={s.label}>Password</Text>
@@ -280,6 +242,7 @@ export default function AuthScreen() {
             placeholderTextColor={colors.mutedForeground}
             secureTextEntry
             onSubmitEditing={handleSubmit}
+            testID="password-input"
           />
 
           {error && (
@@ -288,7 +251,12 @@ export default function AuthScreen() {
             </View>
           )}
 
-          <Pressable style={[s.btn, loading && { opacity: 0.6 }]} onPress={handleSubmit} disabled={loading}>
+          <Pressable
+            style={[s.btn, loading && { opacity: 0.6 }]}
+            onPress={handleSubmit}
+            disabled={loading}
+            testID="auth-submit-btn"
+          >
             {loading ? (
               <ActivityIndicator size="small" color={colors.primaryForeground} />
             ) : (
@@ -297,7 +265,7 @@ export default function AuthScreen() {
           </Pressable>
         </View>
 
-        <Pressable onPress={handleGuestContinue} style={{ alignItems: "center", marginTop: 20 }}>
+        <Pressable onPress={() => router.replace("/setup")} style={{ alignItems: "center", marginTop: 20 }}>
           <Text style={{ color: colors.mutedForeground, fontSize: 14, fontFamily: "Inter_400Regular" }}>
             Continue without account →
           </Text>

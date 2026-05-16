@@ -3,7 +3,6 @@ import * as Haptics from "expo-haptics";
 import React, { useState } from "react";
 import {
   ActivityIndicator,
-  FlatList,
   Platform,
   Pressable,
   ScrollView,
@@ -155,12 +154,12 @@ export default function TestsScreen() {
           <Text style={s.cardTitle}>Record a Test</Text>
           <Text style={s.label}>Test Name</Text>
           <TextInput style={s.input} value={form.name} onChangeText={(v) => setForm((p) => ({ ...p, name: v }))}
-            placeholder="e.g. Data Structures" placeholderTextColor={colors.mutedForeground} />
+            placeholder="e.g. Data Structures" placeholderTextColor={colors.mutedForeground} testID="test-name-input" />
           <View style={s.row}>
             <View style={{ flex: 1 }}>
               <Text style={s.label}>Score (0–100)</Text>
               <TextInput style={s.input} value={form.score} onChangeText={(v) => setForm((p) => ({ ...p, score: v }))}
-                placeholder="85" placeholderTextColor={colors.mutedForeground} keyboardType="decimal-pad" />
+                placeholder="85" placeholderTextColor={colors.mutedForeground} keyboardType="decimal-pad" testID="test-score-input" />
             </View>
           </View>
           <Text style={s.label}>Notes (optional)</Text>
@@ -170,14 +169,16 @@ export default function TestsScreen() {
           {error && <Text style={s.errorText}>{error}</Text>}
           {success && <Text style={s.successText}>Test recorded successfully!</Text>}
           <Pressable style={[s.btn, recordMutation.isPending && { opacity: 0.6 }]}
-            onPress={handleSubmit} disabled={recordMutation.isPending}>
+            onPress={handleSubmit} disabled={recordMutation.isPending} testID="record-test-btn">
             {recordMutation.isPending
               ? <ActivityIndicator size="small" color={colors.primaryForeground} />
               : <Text style={s.btnText}>Record Test</Text>}
           </Pressable>
         </View>
 
-        <Text style={s.sectionTitle}>Past Tests {isFetching && <ActivityIndicator size="small" color={colors.primary} />}</Text>
+        <Text style={s.sectionTitle}>
+          Past Tests {isFetching && <ActivityIndicator size="small" color={colors.primary} />}
+        </Text>
 
         {tests.length === 0 ? (
           <View style={s.emptyWrap}>

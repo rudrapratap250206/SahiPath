@@ -1,7 +1,6 @@
 import AsyncStorage from "@react-native-async-storage/async-storage";
 import {
   setAuthTokenGetter,
-  setBaseUrl,
   useGetMe,
   useLogin,
   useLogout,
@@ -10,9 +9,6 @@ import {
   type UserProfile,
 } from "@workspace/api-client-react";
 import React, { createContext, useCallback, useContext, useEffect, useRef, useState } from "react";
-
-const domain = process.env.EXPO_PUBLIC_DOMAIN;
-if (domain) setBaseUrl(`https://${domain}`);
 
 const TOKEN_KEY = "sahipath_auth_token";
 

@@ -4,7 +4,6 @@ import * as WebBrowser from "expo-web-browser";
 import React, { useEffect, useState } from "react";
 import {
   ActivityIndicator,
-  FlatList,
   Platform,
   Pressable,
   ScrollView,
@@ -106,9 +105,7 @@ export default function JobsScreen() {
       ]);
       const combined = [...remoteJobs, ...himalayasJobs];
       setJobs(combined);
-      if (combined.length === 0) {
-        setError("No live listings found. Try the job boards below.");
-      }
+      if (combined.length === 0) setError("No live listings found. Try the job boards below.");
     } catch {
       setError("Couldn't load live listings. Use the job boards below.");
     } finally {
@@ -184,12 +181,7 @@ export default function JobsScreen() {
     jobMetaItem: { flexDirection: "row", alignItems: "center", gap: 4 },
     jobMetaText: { fontSize: 12, color: colors.mutedForeground, fontFamily: "Inter_400Regular" },
     tagsRow: { flexDirection: "row", flexWrap: "wrap", gap: 5, marginTop: 8 },
-    tag: {
-      backgroundColor: colors.secondary,
-      borderRadius: 5,
-      paddingHorizontal: 7,
-      paddingVertical: 3,
-    },
+    tag: { backgroundColor: colors.secondary, borderRadius: 5, paddingHorizontal: 7, paddingVertical: 3 },
     tagText: { fontSize: 11, color: colors.mutedForeground, fontFamily: "Inter_400Regular" },
     applyBtn: {
       marginTop: 10,
@@ -204,7 +196,6 @@ export default function JobsScreen() {
       borderColor: colors.primary + "44",
     },
     applyText: { fontSize: 13, fontFamily: "Inter_600SemiBold", color: colors.primary },
-    errorText: { color: colors.mutedForeground, fontSize: 13, fontFamily: "Inter_400Regular", textAlign: "center", paddingHorizontal: 20, marginTop: 16 },
     footer: { height: bottomPad + 80 },
   });
 
@@ -213,11 +204,9 @@ export default function JobsScreen() {
       <View style={s.header}>
         <View>
           <Text style={s.headerTitle}>Jobs</Text>
-          <Text style={s.headerSub}>
-            Showing results for "{primarySkill}"
-          </Text>
+          <Text style={s.headerSub}>Showing results for "{primarySkill}"</Text>
         </View>
-        <Pressable style={s.refreshBtn} onPress={loadJobs}>
+        <Pressable style={s.refreshBtn} onPress={loadJobs} testID="refresh-jobs-btn">
           <Feather name="refresh-cw" size={16} color={colors.foreground} />
         </Pressable>
       </View>
@@ -264,7 +253,7 @@ export default function JobsScreen() {
               borderColor: colors.border,
             }}>
               <Feather name="wifi-off" size={28} color={colors.border} />
-              <Text style={[s.errorText, { marginTop: 10 }]}>{error}</Text>
+              <Text style={{ color: colors.mutedForeground, fontSize: 13, marginTop: 10, textAlign: "center", fontFamily: "Inter_400Regular" }}>{error}</Text>
             </View>
           )}
 
@@ -296,7 +285,7 @@ export default function JobsScreen() {
                   ))}
                 </View>
               )}
-              <Pressable style={s.applyBtn} onPress={() => openUrl(job.url)}>
+              <Pressable style={s.applyBtn} onPress={() => openUrl(job.url)} testID={`apply-${job.id}`}>
                 <Feather name="external-link" size={13} color={colors.primary} />
                 <Text style={s.applyText}>View & Apply</Text>
               </Pressable>
